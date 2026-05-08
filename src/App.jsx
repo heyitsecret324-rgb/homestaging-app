@@ -1,83 +1,75 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { 
-  Home, CheckCircle2, Plus, Trash2, 
-  Check, PencilLine, Share2, MapPin, 
-  Printer, Layout, ArrowRight, Layers,
-  ChevronRight, Calendar
+  Home, Sofa, Utensils, Bath, Bed, Plus, Trash2, 
+  Image as ImageIcon, Share2, Printer, Loader2, Info,
+  CheckCircle2, PlusCircle, X
 } from 'lucide-react';
 
-/**
- * 環境變數讀取與 Firebase 初始化
- */
-function pickViteEnv(key, fallback = '') {
-  try {
-    const v = import.meta?.env?.[key];
-    return typeof v === 'string' ? v : fallback;
-  } catch {
-    return fallback;
-  }
-}
+// --- Firebase Initialization ---
+let app = null, auth = null, db = null;
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'homestaging-portfolio';
 
-function getFirebaseConfig() {
+const initFirebase = () => {
   try {
     if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-      return JSON.parse(__firebase_config);
+      const config = JSON.parse(__firebase_config);
+      if (config && Object.keys(config).length > 0) {
+        app = getApps().length === 0 ? initializeApp(config) : getApps()[0];
+        auth = getAuth(app);
+        db = getFirestore(app);
+        return true;
+      }
     }
   } catch (e) {
-    console.error("Firebase config parse error", e);
+    console.error("Firebase init failed:", e);
   }
+  return false;
+};
 
-  return {
-    apiKey: pickViteEnv('VITE_FIREBASE_API_KEY'),
-    authDomain: pickViteEnv('VITE_FIREBASE_AUTH_DOMAIN'),
-    projectId: pickViteEnv('VITE_FIREBASE_PROJECT_ID', 'homestaging-v1'),
-    storageBucket: pickViteEnv('VITE_FIREBASE_STORAGE_BUCKET'),
-    messagingSenderId: pickViteEnv('VITE_FIREBASE_MESSAGING_SENDER_ID'),
-    appId: pickViteEnv('VITE_FIREBASE_APP_ID'),
-  };
-}
+// --- Default Data ---
+const defaultSpaces = [
+  { id: 's1', name: '玄關', functionalZone: '落塵、換鞋', items: [] },
+  { id: 's2', name: '客廳', functionalZone: '休閒、會客', items: [] },
+  { id: 's3', name: '餐廳', functionalZone: '吃飯、會客', items: [] },
+  { id: 's4', name: '廚房', functionalZone: '煮飯', items: [] },
+  { id: 's5', name: '衛浴', functionalZone: '洗漱', items: [] },
+  { id: 's6', name: '主臥室', functionalZone: '休息', items: [] },
+  { id: 's7', name: '房間', functionalZone: '小孩房/客房', items: [] },
+  { id: 's8', name: '書房', functionalZone: '閱讀、工作', items: [] }
+];
 
-const firebaseConfig = getFirebaseConfig();
-const appId = (typeof __app_id !== 'undefined' && __app_id) ? __app_id : pickViteEnv('VITE_FIREBASE_APP_ID', "homestaging-v1");
-
-let app, auth, db;
-try {
-  if (getApps().length === 0) {
-    app = initializeApp(firebaseConfig);
-  } else {
-    app = getApps()[0];
-  }
-  auth = getAuth(app);
-  db = getFirestore(app);
-} catch (error) {
-  console.error("Firebase init failed", error);
-}
+const defaultBasicInfo = {
+  projectName: '',
+  occupants: '',
+  condition: '',
+  mustHaves: { req1: '', req2: '', req3: '' },
+  designNeeds: { style: '', colorPalette: '', visualFeel: '' }
+};
 
 export default function App() {
-  const [stagingData, setStagingData] = useState(null); 
-  const [activeSpaceId, setActiveSpaceId] = useState(null);
-  const [isEditing, setIsEditing] = useState(false);
+  const [isReady, setIsReady] = useState(false);
   const [user, setUser] = useState(null);
-  const [projectId, setProjectId] = useState(null);
-  const [copyFeedback, setCopyFeedback] = useState(false);
-  const [initError, setInitError] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [projectId, setProjectId] = useState('');
   
-  const hasLoadedInitial = useRef(false);
+  // Data States
+  const [basicInfo, setBasicInfo] = useState(defaultBasicInfo);
+  const [spaces, setSpaces] = useState(defaultSpaces);
+  const [activeTab, setActiveTab] = useState('basic'); // 'basic' or space id
+  
+  // UI States
+  const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const skipNextSnapshot = useRef(false);
 
+  // --- Auth & Setup ---
   useEffect(() => {
-    if (!auth) {
-      setInitError('Firebase Auth 尚未初始化');
-      setLoading(false);
+    if (!initFirebase()) {
+      setIsReady(true);
       return;
     }
-
-    const urlParams = new URLSearchParams(window.location.search);
-    const pid = urlParams.get('project') || 'demo_project';
-    setProjectId(pid);
 
     const initAuth = async () => {
       try {
@@ -90,373 +82,576 @@ export default function App() {
         console.error("Auth error:", err);
       }
     };
-    
     initAuth();
-    return onAuthStateChanged(auth, (u) => {
+
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
+      setIsReady(true);
     });
+    return () => unsubscribe();
   }, []);
 
+  // --- URL & Project ID Management ---
   useEffect(() => {
-    if (!projectId || !user || !db) return;
+    if (!isReady || !user) return;
+
+    const params = new URLSearchParams(window.location.search);
+    let currentId = params.get('pid');
+    
+    if (!currentId) {
+      currentId = crypto.randomUUID().split('-')[0];
+      const newUrl = `${window.location.pathname}?pid=${currentId}`;
+      window.history.replaceState({}, '', newUrl);
+    }
+    setProjectId(currentId);
+  }, [isReady, user]);
+
+  // --- Data Sync ---
+  useEffect(() => {
+    if (!user || !projectId || !db) return;
 
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'projects', projectId);
     
-    const unsubscribe = onSnapshot(docRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        setStagingData(data);
-        if (!hasLoadedInitial.current && data.spaces?.length > 0) {
-          setActiveSpaceId(data.spaces[0].id);
-          hasLoadedInitial.current = true;
-        }
-      } else {
-        const defaultData = {
-          projectInfo: { name: "新建軟裝提案", address: "未設定地址", styleDesc: "現代極簡" },
-          spaces: [{ id: "s1", name: "客廳", items: [] }]
-        };
-        setStagingData(defaultData);
-        setActiveSpaceId("s1");
-        setDoc(docRef, defaultData).catch(console.error);
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (skipNextSnapshot.current) {
+        skipNextSnapshot.current = false;
+        return;
       }
-      setLoading(false);
-    }, (err) => {
-      console.error("Firestore snapshot error:", err);
-      setInitError(`資料庫連線失敗: ${err.message}`);
-      setLoading(false);
+      
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.basicInfo) setBasicInfo(data.basicInfo);
+        if (data.spaces) setSpaces(data.spaces);
+      } else {
+        // Init project
+        setDoc(docRef, { basicInfo: defaultBasicInfo, spaces: defaultSpaces }, { merge: true });
+      }
+    }, (error) => {
+      console.error("Sync error:", error);
     });
-    
-    return () => unsubscribe();
-  }, [projectId, user]);
 
-  const syncToCloud = async (newData) => {
-    if (!user || !db || !projectId) return;
-    setStagingData(newData);
-    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'projects', projectId);
-    await setDoc(docRef, newData).catch(console.error);
+    return () => unsubscribe();
+  }, [user, projectId]);
+
+  // Debounced Save
+  useEffect(() => {
+    if (!user || !projectId || !db || !isReady) return;
+    
+    const saveTimer = setTimeout(async () => {
+      setSaving(true);
+      skipNextSnapshot.current = true;
+      try {
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'projects', projectId);
+        await setDoc(docRef, {
+          basicInfo,
+          spaces,
+          lastUpdated: new Date().toISOString()
+        }, { merge: true });
+      } catch (error) {
+        console.error("Save failed:", error);
+      } finally {
+        setSaving(false);
+      }
+    }, 1000);
+
+    return () => clearTimeout(saveTimer);
+  }, [basicInfo, spaces, user, projectId, isReady]);
+
+  // --- Handlers ---
+  const handleCopyLink = () => {
+    const url = window.location.href;
+    const tempInput = document.createElement('input');
+    tempInput.value = url;
+    document.body.appendChild(tempInput);
+    tempInput.select();
+    document.execCommand('copy');
+    document.body.removeChild(tempInput);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
-  const activeSpace = useMemo(() => 
-    stagingData?.spaces?.find(s => s.id === activeSpaceId) || stagingData?.spaces?.[0], 
-    [stagingData, activeSpaceId]
-  );
+  const handlePrint = () => {
+    window.print();
+  };
 
-  const totalBudget = useMemo(() => {
-    if (!stagingData?.spaces) return 0;
-    return stagingData.spaces.reduce((sum, s) => {
-      return sum + (s.items?.reduce((as, i) => as + (Number(i.price) || 0), 0) || 0);
-    }, 0);
-  }, [stagingData]);
+  const updateBasicInfo = (key, value, nestedKey = null) => {
+    setBasicInfo(prev => {
+      if (nestedKey) {
+        return { ...prev, [key]: { ...prev[key], [nestedKey]: value } };
+      }
+      return { ...prev, [key]: value };
+    });
+  };
 
-  if (loading && !initError) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-[#FAF9F6]">
-        <div className="text-center">
-          <div className="w-12 h-12 border-2 border-[#8B6B4D] border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
-          <p className="text-[#8B6B4D] font-serif tracking-[0.3em] text-xs uppercase">Connecting to Database</p>
-        </div>
-      </div>
-    );
+  const addSpace = () => {
+    const newSpace = {
+      id: crypto.randomUUID().substring(0, 8),
+      name: '新空間',
+      functionalZone: '',
+      items: []
+    };
+    setSpaces([...spaces, newSpace]);
+    setActiveTab(newSpace.id);
+  };
+
+  const removeSpace = (id) => {
+    setSpaces(spaces.filter(s => s.id !== id));
+    if (activeTab === id) setActiveTab('basic');
+  };
+
+  const updateSpace = (id, key, value) => {
+    setSpaces(spaces.map(s => s.id === id ? { ...s, [key]: value } : s));
+  };
+
+  const addItem = (spaceId) => {
+    const newItem = {
+      id: crypto.randomUUID().substring(0, 8),
+      isExisting: false,
+      image: '',
+      name: '',
+      size: '',
+      qty: 1,
+      color: '',
+      material: '',
+      unitPrice: 0
+    };
+    setSpaces(spaces.map(s => {
+      if (s.id === spaceId) return { ...s, items: [...s.items, newItem] };
+      return s;
+    }));
+  };
+
+  const updateItem = (spaceId, itemId, key, value) => {
+    setSpaces(spaces.map(s => {
+      if (s.id === spaceId) {
+        return {
+          ...s,
+          items: s.items.map(item => item.id === itemId ? { ...s, [key]: value } : item)
+        };
+      }
+      return s;
+    }));
+  };
+
+  const updateItemField = (spaceId, itemId, field, value) => {
+    setSpaces(prevSpaces => prevSpaces.map(space => {
+      if (space.id === spaceId) {
+        return {
+          ...space,
+          items: space.items.map(item => item.id === itemId ? { ...item, [field]: value } : item)
+        };
+      }
+      return space;
+    }));
+  };
+
+  const removeItem = (spaceId, itemId) => {
+    setSpaces(spaces.map(s => {
+      if (s.id === spaceId) {
+        return { ...s, items: s.items.filter(item => item.id !== itemId) };
+      }
+      return s;
+    }));
+  };
+
+  // Image compression and upload
+  const handleImageUpload = (spaceId, itemId, file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (e) => {
+      const img = new Image();
+      img.src = e.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 400;
+        let width = img.width;
+        let height = img.height;
+        
+        if (width > MAX_WIDTH) {
+          height *= MAX_WIDTH / width;
+          width = MAX_WIDTH;
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.6);
+        updateItemField(spaceId, itemId, 'image', compressedDataUrl);
+      };
+    };
+  };
+
+  // Calculations
+  const calculateTotals = () => {
+    let existingCount = 0;
+    let newCount = 0;
+    let totalBudget = 0;
+
+    spaces.forEach(space => {
+      space.items.forEach(item => {
+        if (item.isExisting) {
+          existingCount += parseInt(item.qty || 0);
+        } else {
+          newCount += parseInt(item.qty || 0);
+          totalBudget += (parseInt(item.qty || 0) * parseInt(item.unitPrice || 0));
+        }
+      });
+    });
+
+    return { existingCount, newCount, totalBudget };
+  };
+
+  const calculateSpaceTotal = (spaceId) => {
+    const space = spaces.find(s => s.id === spaceId);
+    if (!space) return 0;
+    return space.items
+      .filter(item => !item.isExisting)
+      .reduce((sum, item) => sum + (parseInt(item.qty || 0) * parseInt(item.unitPrice || 0)), 0);
+  };
+
+  const totals = calculateTotals();
+
+  if (!isReady) {
+    return <div className="min-h-screen bg-[#FAF9F6] flex items-center justify-center text-[#8B6B4D]"><Loader2 className="animate-spin w-10 h-10" /></div>;
   }
 
-  if (initError) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-[#FAF9F6] p-6">
-        <div className="max-w-md w-full bg-white border border-red-50 p-10 rounded-[3rem] shadow-2xl text-center">
-          <Layers size={32} className="text-red-300 mx-auto mb-6" />
-          <h3 className="font-bold text-xl text-[#2D241E] mb-4">初始化異常</h3>
-          <p className="text-sm text-[#A68B6D] mb-8 leading-relaxed">{initError}</p>
-          <button onClick={() => window.location.reload()} className="w-full py-4 bg-[#2D241E] text-white rounded-2xl text-sm font-bold tracking-widest">RELOAD PAGE</button>
-        </div>
-      </div>
-    );
-  }
+  const activeSpace = spaces.find(s => s.id === activeTab);
 
   return (
-    <div className="min-h-screen bg-[#FAF9F6] text-[#2D241E] font-serif selection:bg-[#8B6B4D]/10">
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;700&family=Noto+Sans+TC:wght@300;400;700&display=swap');
-        :root { font-family: 'Noto Serif TC', serif; }
-        .font-sans { font-family: 'Noto Sans TC', sans-serif; }
-        #root { width: 100% !important; max-width: 100% !important; margin: 0 !important; border: none !important; display: block !important; }
-        @media print { .print-hidden { display: none !important; } body { background: white; } }
-        .glass { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(20px); }
-        .slide-up { animation: slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1); }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-      `}</style>
+    <div className="min-h-screen bg-[#FAF9F6] text-[#2D241E] font-sans selection:bg-[#E8DCC4] pb-32">
+      {/* Import Fonts */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@500;700;900&display=swap');
+        .font-serif-tc { font-family: 'Noto Serif TC', serif; }
+        .font-sans-tc { font-family: 'Noto Sans TC', sans-serif; }
+        
+        @media print {
+          .no-print { display: none !important; }
+          body { background: white !important; }
+          .print-full { width: 100% !important; max-width: none !important; padding: 0 !important; margin: 0 !important; }
+          .print-card { border: none !important; box-shadow: none !important; padding: 0 !important; }
+        }
+      `}} />
 
-      {/* Header */}
-      <header className="glass border-b border-[#E8DCC4]/30 px-8 py-5 sticky top-0 z-50 print-hidden">
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <div className="flex items-center gap-5">
-            <div className="bg-[#2D241E] w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-lg rotate-3">
-              <Layout size={22} />
-            </div>
-            <div>
-              <h1 className="font-bold text-xl tracking-tight m-0 leading-none">你家的好表</h1>
-              <p className="text-[9px] tracking-[0.4em] text-[#A68B6D] uppercase font-sans font-bold m-0 mt-1.5 opacity-60">Staging Dashboard v2.0</p>
-            </div>
+      {/* Top Navigation Bar (Hidden on Print) */}
+      <div className="no-print bg-white/80 backdrop-blur-md border-b border-[#E8DCC4]/50 sticky top-0 z-50 px-6 py-4 flex justify-between items-center shadow-[#8B6B4D]/5 shadow-sm">
+        <div className="flex items-center gap-4">
+          <div className="bg-[#8B6B4D] text-white p-2 rounded-xl rotate-3">
+            <Home className="w-5 h-5" />
           </div>
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={() => {
-                const el = document.createElement('input');
-                el.value = window.location.href;
-                document.body.appendChild(el);
-                el.select();
-                document.execCommand('copy');
-                document.body.removeChild(el);
-                setCopyFeedback(true);
-                setTimeout(() => setCopyFeedback(false), 2000);
-              }} 
-              className="p-3 bg-white border border-[#E8DCC4]/50 rounded-full text-[#8B6B4D] hover:bg-[#8B6B4D] hover:text-white transition-all shadow-sm"
-            >
-              {copyFeedback ? <Check size={18} /> : <Share2 size={18} />}
-            </button>
-            <button 
-              onClick={() => setIsEditing(!isEditing)} 
-              className={`flex items-center gap-3 px-8 py-3 rounded-full font-sans text-xs font-bold tracking-[0.1em] transition-all ${
-                isEditing ? 'bg-[#8B6B4D] text-white shadow-xl scale-105' : 'bg-[#2D241E] text-white shadow-lg'
-              }`}
-            >
-              {isEditing ? <CheckCircle2 size={16} /> : <PencilLine size={16} />}
-              {isEditing ? 'FINISH EDIT' : 'EDIT PROPOSAL'}
-            </button>
+          <div className="flex flex-col">
+            <span className="text-xs text-[#A68B6D] tracking-[0.2em] uppercase font-bold">Project ID: {projectId}</span>
+            <span className="text-sm font-medium flex items-center gap-2">
+              {saving ? <><Loader2 className="w-3 h-3 animate-spin text-[#8B6B4D]"/> 儲存中...</> : <><CheckCircle2 className="w-3 h-3 text-green-600"/> 已儲存</>}
+            </span>
           </div>
         </div>
-      </header>
+        <div className="flex items-center gap-3">
+          <button onClick={handleCopyLink} className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#FAF9F6] border border-[#E8DCC4] text-[#8B6B4D] hover:bg-[#E8DCC4]/30 transition-colors text-sm font-medium">
+            {copied ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : <Share2 className="w-4 h-4" />}
+            {copied ? '已複製連結' : '分享給客戶'}
+          </button>
+          <button onClick={handlePrint} className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#2D241E] text-[#FAF9F6] hover:bg-[#2D241E]/90 transition-colors text-sm font-medium">
+            <Printer className="w-4 h-4" />
+            預覽 / 列印
+          </button>
+        </div>
+      </div>
 
-      <main className="max-w-7xl mx-auto px-8 py-12 md:py-20 space-y-16 slide-up">
-        {/* Project Hero Section */}
-        <section className="relative bg-white rounded-[3rem] p-12 md:p-20 border border-[#E8DCC4]/40 shadow-2xl shadow-[#8B6B4D]/5 overflow-hidden">
-          {/* Decorative Elements */}
-          <div className="absolute top-0 right-0 w-64 h-64 bg-[#FDFBF7] rounded-full -mr-32 -mt-32 z-0"></div>
-          <div className="absolute bottom-0 left-0 w-32 h-1 bg-[#8B6B4D]"></div>
-          
-          <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-end gap-12">
-            <div className="flex-1 space-y-8">
-              <div className="flex items-center gap-4">
-                <span className="text-[10px] font-sans font-bold text-[#8B6B4D] uppercase tracking-[0.5em] bg-[#FDFBF7] px-4 py-1.5 rounded-full border border-[#E8DCC4]/30">Interior Proposal</span>
-                <span className="text-[10px] font-sans font-bold text-[#A68B6D] uppercase tracking-[0.2em] opacity-40">/ 2024 Edition</span>
+      <div className="max-w-[1400px] mx-auto px-6 lg:px-12 py-12 lg:py-20 flex flex-col lg:flex-row gap-12 print-full">
+        
+        {/* Left Sidebar (Space Navigation) */}
+        <div className="lg:w-1/4 flex-shrink-0 no-print space-y-8">
+          {/* Brand Identity */}
+          <div className="mb-12">
+            <h2 className="text-[#A68B6D] text-[10px] tracking-[0.4em] uppercase mb-4 font-sans-tc">HOME STAGING PORTFOLIO</h2>
+            <h1 className="font-serif-tc text-5xl lg:text-6xl font-bold text-[#2D241E] mb-3 leading-tight">你家的<br/>好表</h1>
+            <p className="text-[#8B6B4D] font-serif-tc text-lg tracking-widest relative inline-block">
+              為你的空間 錦上添花
+              <span className="absolute -bottom-2 left-0 w-1/2 h-[1px] bg-[#E8DCC4]"></span>
+            </p>
+            <p className="mt-8 text-sm text-[#A68B6D] font-medium">景尚空間有限公司</p>
+          </div>
+
+          <div className="bg-white rounded-[2rem] p-4 shadow-[#8B6B4D]/5 shadow-xl border border-[#E8DCC4]/50">
+            <nav className="space-y-1">
+              <button 
+                onClick={() => setActiveTab('basic')}
+                className={`w-full text-left px-5 py-4 rounded-2xl transition-all duration-300 font-medium ${activeTab === 'basic' ? 'bg-[#8B6B4D] text-white shadow-md' : 'text-[#8B6B4D] hover:bg-[#FAF9F6]'}`}
+              >
+                1. 基本資料設定
+              </button>
+              
+              <div className="pt-4 pb-2 px-5">
+                <p className="text-[10px] text-[#A68B6D] tracking-[0.2em] uppercase">2. 空間清單盤點</p>
               </div>
               
-              {isEditing ? (
-                <div className="space-y-6">
-                  <input 
-                    className="text-5xl md:text-7xl font-bold w-full border-b-2 border-[#E8DCC4] outline-none bg-transparent py-2 focus:border-[#8B6B4D] transition-all"
-                    value={stagingData.projectInfo?.name || ""} 
-                    onChange={(e) => syncToCloud({...stagingData, projectInfo: {...stagingData.projectInfo, name: e.target.value}})}
-                  />
-                  <div className="flex flex-wrap gap-4">
-                    <input className="font-sans text-sm px-5 py-3 bg-[#FAF9F6] rounded-2xl border border-[#E8DCC4]/30 outline-none w-full md:w-auto min-w-[300px]" value={stagingData.projectInfo?.address} onChange={(e) => syncToCloud({...stagingData, projectInfo: {...stagingData.projectInfo, address: e.target.value}})} placeholder="輸入案件地址..." />
-                    <input className="font-sans text-sm px-5 py-3 bg-[#FAF9F6] rounded-2xl border border-[#E8DCC4]/30 outline-none w-full md:w-auto" value={stagingData.projectInfo?.styleDesc} onChange={(e) => syncToCloud({...stagingData, projectInfo: {...stagingData.projectInfo, styleDesc: e.target.value}})} placeholder="風格描述..." />
-                  </div>
+              {spaces.map(space => (
+                <div key={space.id} className="group relative flex items-center">
+                  <button 
+                    onClick={() => setActiveTab(space.id)}
+                    className={`flex-1 text-left px-5 py-3 rounded-2xl transition-all duration-300 ${activeTab === space.id ? 'bg-[#FAF9F6] text-[#2D241E] font-bold border border-[#E8DCC4]/50' : 'text-[#8B6B4D] hover:bg-[#FAF9F6]/50'}`}
+                  >
+                    {space.name || '未命名空間'}
+                  </button>
+                  <button 
+                    onClick={() => removeSpace(space.id)}
+                    className="absolute right-3 opacity-0 group-hover:opacity-100 p-2 text-[#A68B6D] hover:text-red-500 transition-opacity"
+                    title="刪除空間"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
-              ) : (
-                <div className="space-y-6">
-                  <h2 className="text-5xl md:text-7xl font-bold leading-[1] tracking-tight m-0 text-[#2D241E]">{stagingData.projectInfo?.name}</h2>
-                  <div className="flex flex-wrap items-center gap-8 text-[#A68B6D]">
-                    <p className="flex items-center gap-2.5 m-0 text-lg font-medium italic"><MapPin size={18} className="text-[#8B6B4D]" /> {stagingData.projectInfo?.address}</p>
-                    <div className="h-4 w-[1px] bg-[#E8DCC4] hidden md:block"></div>
-                    <p className="m-0 font-sans font-bold tracking-widest text-[10px] uppercase bg-[#FAF9F6] px-5 py-2 rounded-full border border-[#E8DCC4]/30">{stagingData.projectInfo?.styleDesc}</p>
-                  </div>
-                </div>
-              )}
-            </div>
+              ))}
+              
+              <button 
+                onClick={addSpace}
+                className="w-full mt-2 flex items-center justify-center gap-2 px-5 py-4 rounded-2xl border border-dashed border-[#A68B6D]/40 text-[#A68B6D] hover:bg-[#FAF9F6] hover:text-[#8B6B4D] transition-colors text-sm"
+              >
+                <Plus className="w-4 h-4" /> 新增空間
+              </button>
+            </nav>
+          </div>
+        </div>
 
-            {/* Price Tag Box - Refined */}
-            <div className="w-full md:w-[340px] bg-[#2D241E] text-white p-12 rounded-[2.5rem] shadow-3xl transform hover:-translate-y-2 transition-transform duration-500">
-              <div className="flex justify-between items-center mb-6 opacity-40">
-                <p className="text-[10px] font-sans font-bold uppercase tracking-[0.3em] m-0">Project Valuation</p>
-                <Calendar size={14} />
+        {/* Right Content Area */}
+        <div className="lg:w-3/4 flex-1 space-y-16 print-full">
+          
+          {/* Mobile Header (Visible only on small screens and print) */}
+          <div className="lg:hidden print:block mb-8 print:mb-12">
+            <h2 className="text-[#A68B6D] text-[10px] tracking-[0.4em] uppercase mb-2">HOME STAGING PORTFOLIO</h2>
+            <h1 className="font-serif-tc text-4xl print:text-5xl font-bold text-[#2D241E] mb-2">你家的好表</h1>
+            <p className="text-[#8B6B4D] font-serif-tc tracking-widest text-sm print:text-base">為你的空間 錦上添花 | 景尚空間有限公司</p>
+          </div>
+
+          {activeTab === 'basic' && (
+            <div className="bg-white rounded-[3rem] p-8 lg:p-12 shadow-[#8B6B4D]/5 shadow-2xl border border-[#E8DCC4]/30 print-card">
+              <h2 className="font-serif-tc text-3xl font-bold text-[#2D241E] mb-10 flex items-center gap-4">
+                <span className="w-8 h-8 rounded-full bg-[#8B6B4D] text-white flex items-center justify-center text-sm font-sans">1</span>
+                基本資料
+              </h2>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-10">
+                <div className="space-y-3">
+                  <label className="text-sm font-bold text-[#8B6B4D]">案件名稱</label>
+                  <input type="text" className="w-full bg-[#FAF9F6] border-none rounded-2xl px-6 py-4 focus:ring-2 focus:ring-[#E8DCC4] transition-shadow text-[#2D241E]" 
+                    value={basicInfo.projectName} onChange={e => updateBasicInfo('projectName', e.target.value)} placeholder="例如：大安區陳公館" />
+                </div>
+                <div className="space-y-3">
+                  <label className="text-sm font-bold text-[#8B6B4D]">居住人數</label>
+                  <input type="text" className="w-full bg-[#FAF9F6] border-none rounded-2xl px-6 py-4 focus:ring-2 focus:ring-[#E8DCC4] transition-shadow text-[#2D241E]" 
+                    value={basicInfo.occupants} onChange={e => updateBasicInfo('occupants', e.target.value)} placeholder="例如：2大1小" />
+                </div>
+                <div className="space-y-3 md:col-span-2">
+                  <label className="text-sm font-bold text-[#8B6B4D]">屋況</label>
+                  <input type="text" className="w-full bg-[#FAF9F6] border-none rounded-2xl px-6 py-4 focus:ring-2 focus:ring-[#E8DCC4] transition-shadow text-[#2D241E]" 
+                    value={basicInfo.condition} onChange={e => updateBasicInfo('condition', e.target.value)} placeholder="例如：新成屋 / 預售屋客變 / 老屋翻新" />
+                </div>
+
+                <div className="md:col-span-2 mt-4 pt-8 border-t border-[#E8DCC4]/30">
+                  <h3 className="text-sm font-bold text-[#8B6B4D] mb-6 tracking-wide">必要需求 (1-3個)</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <input type="text" className="w-full bg-[#FAF9F6] border-none rounded-2xl px-6 py-4 focus:ring-2 focus:ring-[#E8DCC4]" 
+                      value={basicInfo.mustHaves.req1} onChange={e => updateBasicInfo('mustHaves', e.target.value, 'req1')} placeholder="需求 1" />
+                    <input type="text" className="w-full bg-[#FAF9F6] border-none rounded-2xl px-6 py-4 focus:ring-2 focus:ring-[#E8DCC4]" 
+                      value={basicInfo.mustHaves.req2} onChange={e => updateBasicInfo('mustHaves', e.target.value, 'req2')} placeholder="需求 2" />
+                    <input type="text" className="w-full bg-[#FAF9F6] border-none rounded-2xl px-6 py-4 focus:ring-2 focus:ring-[#E8DCC4]" 
+                      value={basicInfo.mustHaves.req3} onChange={e => updateBasicInfo('mustHaves', e.target.value, 'req3')} placeholder="需求 3" />
+                  </div>
+                </div>
+
+                <div className="md:col-span-2 mt-4 pt-8 border-t border-[#E8DCC4]/30">
+                  <h3 className="text-sm font-bold text-[#8B6B4D] mb-6 tracking-wide">設計需求</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="space-y-2">
+                      <label className="text-xs text-[#A68B6D] px-2">1. 風格</label>
+                      <input type="text" className="w-full bg-[#FAF9F6] border-none rounded-2xl px-6 py-4 focus:ring-2 focus:ring-[#E8DCC4]" 
+                        value={basicInfo.designNeeds.style} onChange={e => updateBasicInfo('designNeeds', e.target.value, 'style')} placeholder="如：侘寂風、北歐風" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs text-[#A68B6D] px-2">2. 色調</label>
+                      <input type="text" className="w-full bg-[#FAF9F6] border-none rounded-2xl px-6 py-4 focus:ring-2 focus:ring-[#E8DCC4]" 
+                        value={basicInfo.designNeeds.colorPalette} onChange={e => updateBasicInfo('designNeeds', e.target.value, 'colorPalette')} placeholder="如：大地色、暖白" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs text-[#A68B6D] px-2">3. 視覺感</label>
+                      <input type="text" className="w-full bg-[#FAF9F6] border-none rounded-2xl px-6 py-4 focus:ring-2 focus:ring-[#E8DCC4]" 
+                        value={basicInfo.designNeeds.visualFeel} onChange={e => updateBasicInfo('designNeeds', e.target.value, 'visualFeel')} placeholder="如：溫馨、俐落" />
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="flex items-baseline gap-2 mb-8">
-                <span className="text-2xl font-light opacity-30">$</span>
-                <span className="text-6xl font-sans font-bold tracking-tighter tabular-nums">{totalBudget.toLocaleString()}</span>
+            </div>
+          )}
+
+          {activeSpace && (
+            <div className="space-y-16">
+              {/* Space Header Card */}
+              <div className="bg-white rounded-[3rem] p-8 lg:p-12 shadow-[#8B6B4D]/5 shadow-2xl border border-[#E8DCC4]/30 print-card relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-[#FAF9F6] rounded-full -translate-y-1/2 translate-x-1/3 opacity-50"></div>
+                
+                <h2 className="font-serif-tc text-3xl font-bold text-[#2D241E] mb-10 flex items-center gap-4 relative z-10">
+                  <span className="w-8 h-8 rounded-full bg-[#A68B6D] text-white flex items-center justify-center text-sm font-sans">2</span>
+                  空間定義
+                </h2>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-10 relative z-10">
+                  <div className="space-y-3">
+                    <label className="text-sm font-bold text-[#8B6B4D]">空間名稱</label>
+                    <input type="text" className="w-full bg-[#FAF9F6] border-none rounded-2xl px-6 py-4 text-xl font-serif-tc font-bold text-[#2D241E] focus:ring-2 focus:ring-[#E8DCC4]" 
+                      value={activeSpace.name} onChange={e => updateSpace(activeSpace.id, 'name', e.target.value)} />
+                  </div>
+                  <div className="space-y-3">
+                    <label className="text-sm font-bold text-[#8B6B4D]">功能分區</label>
+                    <input type="text" className="w-full bg-[#FAF9F6] border-none rounded-2xl px-6 py-4 text-[#2D241E] focus:ring-2 focus:ring-[#E8DCC4]" 
+                      value={activeSpace.functionalZone} onChange={e => updateSpace(activeSpace.id, 'functionalZone', e.target.value)} placeholder="此空間的主要用途..." />
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1.5 opacity-30 text-[10px] font-sans leading-relaxed">
-                <p className="m-0">估值僅包含家具與家飾清單</p>
-                <p className="m-0">實際報價依採購當時官網與庫存為準</p>
+
+              {/* Items Table Card */}
+              <div className="bg-white rounded-[3rem] p-8 lg:p-12 shadow-[#8B6B4D]/5 shadow-2xl border border-[#E8DCC4]/30 print-card overflow-hidden">
+                <div className="flex justify-between items-end mb-8 no-print">
+                  <h3 className="font-serif-tc text-2xl font-bold text-[#2D241E]">家具與家電清單</h3>
+                  <button onClick={() => addItem(activeSpace.id)} className="flex items-center gap-2 px-5 py-2.5 bg-[#8B6B4D] text-white rounded-full hover:bg-[#7a5d42] transition-colors text-sm font-medium shadow-md shadow-[#8B6B4D]/20">
+                    <PlusCircle className="w-4 h-4" /> 新增物品
+                  </button>
+                </div>
+
+                {activeSpace.items.length === 0 ? (
+                  <div className="text-center py-20 bg-[#FAF9F6] rounded-3xl border border-dashed border-[#E8DCC4]">
+                    <Sofa className="w-12 h-12 mx-auto text-[#E8DCC4] mb-4" />
+                    <p className="text-[#A68B6D] font-medium">這個空間還沒有加入任何物品</p>
+                    <p className="text-sm text-[#A68B6D] opacity-70 mt-2">點擊右上方按鈕開始新增</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto -mx-8 px-8 lg:mx-0 lg:px-0">
+                    <table className="w-full min-w-[900px] text-left border-collapse">
+                      <thead>
+                        <tr className="border-b-2 border-[#2D241E] text-xs uppercase tracking-widest text-[#A68B6D] font-bold">
+                          <th className="py-4 px-2 w-[100px]">狀態</th>
+                          <th className="py-4 px-2 w-[100px]">圖片</th>
+                          <th className="py-4 px-2">名稱/品牌</th>
+                          <th className="py-4 px-2 w-[140px]">尺寸 (W×D×H)</th>
+                          <th className="py-4 px-2 w-[80px]">顏色</th>
+                          <th className="py-4 px-2 w-[100px]">材質</th>
+                          <th className="py-4 px-2 w-[80px] text-center">數量</th>
+                          <th className="py-4 px-2 w-[120px] text-right">單價</th>
+                          <th className="py-4 px-2 w-[50px] no-print"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E8DCC4]/40">
+                        {activeSpace.items.map((item) => (
+                          <tr key={item.id} className="group hover:bg-[#FAF9F6]/50 transition-colors">
+                            {/* Toggle Existing/New */}
+                            <td className="py-6 px-2 align-top">
+                              <button 
+                                onClick={() => updateItemField(activeSpace.id, item.id, 'isExisting', !item.isExisting)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors w-full border ${item.isExisting ? 'bg-[#FAF9F6] text-[#A68B6D] border-[#E8DCC4]' : 'bg-[#8B6B4D] text-white border-[#8B6B4D] shadow-sm'}`}
+                              >
+                                {item.isExisting ? '保留現有' : '新購添置'}
+                              </button>
+                            </td>
+                            {/* Image Upload */}
+                            <td className="py-6 px-2 align-top">
+                              <label className="cursor-pointer block w-20 h-20 bg-[#FAF9F6] rounded-xl border border-[#E8DCC4] overflow-hidden hover:border-[#8B6B4D] transition-colors relative group/img">
+                                {item.image ? (
+                                  <img src={item.image} alt="preview" className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex flex-col items-center justify-center text-[#A68B6D]">
+                                    <ImageIcon className="w-5 h-5 mb-1 opacity-50" />
+                                    <span className="text-[10px]">上傳</span>
+                                  </div>
+                                )}
+                                <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(activeSpace.id, item.id, e.target.files[0])} />
+                              </label>
+                            </td>
+                            <td className="py-6 px-2 align-top">
+                              <input type="text" className="w-full bg-transparent border-none p-0 focus:ring-0 text-[#2D241E] font-medium placeholder-[#D4C3A3]" value={item.name} onChange={e => updateItemField(activeSpace.id, item.id, 'name', e.target.value)} placeholder="物品名稱與品牌" />
+                            </td>
+                            <td className="py-6 px-2 align-top">
+                              <input type="text" className="w-full bg-transparent border-none p-0 focus:ring-0 text-sm text-[#8B6B4D] placeholder-[#D4C3A3]" value={item.size} onChange={e => updateItemField(activeSpace.id, item.id, 'size', e.target.value)} placeholder="0x0x0 cm" />
+                            </td>
+                            <td className="py-6 px-2 align-top">
+                              <input type="text" className="w-full bg-transparent border-none p-0 focus:ring-0 text-sm text-[#8B6B4D] placeholder-[#D4C3A3]" value={item.color} onChange={e => updateItemField(activeSpace.id, item.id, 'color', e.target.value)} placeholder="顏色" />
+                            </td>
+                            <td className="py-6 px-2 align-top">
+                              <input type="text" className="w-full bg-transparent border-none p-0 focus:ring-0 text-sm text-[#8B6B4D] placeholder-[#D4C3A3]" value={item.material} onChange={e => updateItemField(activeSpace.id, item.id, 'material', e.target.value)} placeholder="材質" />
+                            </td>
+                            <td className="py-6 px-2 align-top text-center">
+                              <input type="number" min="1" className="w-16 mx-auto bg-transparent border-none p-0 focus:ring-0 text-center text-[#2D241E] font-medium" value={item.qty} onChange={e => updateItemField(activeSpace.id, item.id, 'qty', e.target.value)} />
+                            </td>
+                            <td className="py-6 px-2 align-top text-right">
+                              <div className={`flex items-center justify-end ${item.isExisting ? 'opacity-30' : ''}`}>
+                                <span className="text-xs text-[#A68B6D] mr-1">$</span>
+                                <input type="number" min="0" disabled={item.isExisting} className="w-24 bg-transparent border-none p-0 focus:ring-0 text-right text-[#2D241E] font-bold disabled:bg-transparent" value={item.unitPrice} onChange={e => updateItemField(activeSpace.id, item.id, 'unitPrice', e.target.value)} placeholder="0" />
+                              </div>
+                            </td>
+                            <td className="py-6 px-2 align-top text-right no-print">
+                              <button onClick={() => removeItem(activeSpace.id, item.id)} className="text-[#E8DCC4] hover:text-red-500 transition-colors p-1">
+                                <X className="w-5 h-5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                
+                {/* Space Subtotal */}
+                {activeSpace.items.length > 0 && (
+                  <div className="mt-8 pt-6 border-t-2 border-[#2D241E] flex justify-end">
+                    <div className="text-right">
+                      <span className="text-xs text-[#A68B6D] uppercase tracking-widest mr-4">此區新購預算小計</span>
+                      <span className="font-serif-tc text-2xl font-bold text-[#8B6B4D]">
+                        $ {calculateSpaceTotal(activeSpace.id).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Bottom Sticky Total Bar */}
+      <div className="fixed bottom-0 left-0 right-0 bg-[#2D241E] text-[#FAF9F6] px-6 lg:px-12 py-5 shadow-[0_-10px_40px_rgba(45,36,30,0.2)] z-40 border-t border-[#5C4839] no-print">
+        <div className="max-w-[1400px] mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-8 lg:gap-16">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-[#FAF9F6]/10 flex items-center justify-center">
+                <Info className="w-5 h-5 text-[#E8DCC4]" />
+              </div>
+              <div>
+                <div className="text-[10px] text-[#A68B6D] tracking-widest uppercase mb-1">現有物品保留</div>
+                <div className="font-bold text-xl">{totals.existingCount} <span className="text-xs font-normal opacity-60">件</span></div>
+              </div>
+            </div>
+            <div className="w-px h-10 bg-[#5C4839]"></div>
+            <div>
+              <div className="text-[10px] text-[#E8DCC4] tracking-widest uppercase mb-1">新購家具添置</div>
+              <div className="font-bold text-xl text-[#E8DCC4]">{totals.newCount} <span className="text-xs font-normal opacity-60">件</span></div>
+            </div>
+          </div>
+          
+          <div className="flex items-end gap-6 text-right">
+            <div className="hidden md:block text-[10px] text-[#A68B6D] max-w-[200px] text-right font-sans-tc leading-relaxed opacity-80 mb-1">
+              * 價格僅供初步預算參考，實際報價以最終挑選品牌與採購當下為準。
+            </div>
+            <div>
+              <div className="text-[10px] text-[#A68B6D] tracking-[0.3em] uppercase mb-1">預估總預算</div>
+              <div className="font-serif-tc text-3xl lg:text-4xl font-bold text-[#E8DCC4]">
+                $ {totals.totalBudget.toLocaleString()}
               </div>
             </div>
           </div>
-        </section>
-
-        {/* Content Layout */}
-        <div className="flex flex-col md:flex-row gap-16 items-start">
-          {/* Navigation Sidebar */}
-          <aside className="w-full md:w-72 space-y-10 sticky top-32 print-hidden">
-            <div>
-              <p className="text-[10px] font-sans font-bold text-[#8B6B4D] uppercase tracking-[0.4em] mb-6 pl-5 border-l-2 border-[#8B6B4D]">Space Catalog</p>
-              <div className="space-y-4">
-                {stagingData.spaces?.map(s => (
-                  <button 
-                    key={s.id} 
-                    onClick={() => setActiveSpaceId(s.id)} 
-                    className={`w-full flex items-center justify-between px-8 py-5 rounded-[1.5rem] transition-all duration-500 group ${
-                      activeSpaceId === s.id 
-                      ? 'bg-white text-[#2D241E] shadow-2xl shadow-[#8B6B4D]/10 border border-[#E8DCC4]/40 translate-x-4' 
-                      : 'text-[#A68B6D] hover:text-[#8B6B4D] hover:translate-x-2'
-                    }`}
-                  >
-                    <span className={`font-bold text-lg ${activeSpaceId === s.id ? 'opacity-100' : 'opacity-60'}`}>{s.name}</span>
-                    <ChevronRight size={16} className={`transition-all ${activeSpaceId === s.id ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-4'}`} />
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {isEditing && (
-              <button 
-                onClick={() => {
-                  const newId = `s${Date.now()}`;
-                  syncToCloud({ ...stagingData, spaces: [...(stagingData.spaces || []), { id: newId, name: "新場域", items: [] }] });
-                }} 
-                className="w-full p-6 border-2 border-dashed border-[#E8DCC4] rounded-[1.5rem] text-[#D4C3A3] hover:text-[#8B6B4D] hover:border-[#8B6B4D] flex items-center justify-center gap-3 transition-all font-sans text-[11px] font-bold tracking-widest uppercase"
-              >
-                <Plus size={16} /> Add New Space
-              </button>
-            )}
-          </aside>
-
-          {/* Table Content */}
-          <section className="flex-1 w-full bg-white rounded-[3rem] border border-[#E8DCC4]/40 shadow-xl shadow-[#8B6B4D]/5 overflow-hidden">
-            {/* Table Header */}
-            <div className="px-12 py-10 border-b border-[#FAF9F6] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 bg-[#FDFBF7]/50">
-              <div className="flex items-center gap-6">
-                <div className="w-1.5 h-10 bg-[#8B6B4D] rounded-full"></div>
-                <div>
-                  <h3 className="font-bold text-3xl tracking-tight m-0">{activeSpace?.name || "場域內容"}</h3>
-                  <p className="text-[10px] font-sans font-bold text-[#A68B6D] uppercase tracking-[0.3em] mt-1.5">Furniture Inventory & Specs</p>
-                </div>
-              </div>
-              {isEditing && activeSpace && (
-                <button 
-                  onClick={() => {
-                    const newItem = { id: `i${Date.now()}`, name: "新家具品項", size: "規格描述", price: 0 };
-                    const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: [...(s.items || []), newItem] } : s);
-                    syncToCloud({ ...stagingData, spaces: newSpaces });
-                  }} 
-                  className="bg-[#2D241E] text-white px-8 py-3.5 rounded-full text-xs font-sans font-bold hover:bg-black transition-all flex items-center gap-3 shadow-lg group"
-                >
-                  <Plus size={14} className="group-hover:rotate-90 transition-transform" /> ADD ITEM
-                </button>
-              )}
-            </div>
-            
-            {/* Table Body */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="text-[10px] font-sans font-bold uppercase tracking-[0.25em] text-[#D4C3A3] border-b border-[#FAF9F6]">
-                    <th className="px-12 py-6">Item Description</th>
-                    <th className="px-12 py-6">Specifications</th>
-                    <th className="px-12 py-6 text-right">Estimate</th>
-                    {isEditing && <th className="px-8 py-6 w-20"></th>}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#FAF9F6]">
-                  {(!activeSpace?.items || activeSpace.items.length === 0) ? (
-                    <tr>
-                      <td colSpan={isEditing ? 4 : 3} className="px-12 py-32 text-center">
-                        <div className="max-w-[200px] mx-auto opacity-20 space-y-4">
-                          <Layers size={48} className="mx-auto" />
-                          <p className="font-sans font-bold tracking-[0.2em] text-xs">NO ITEMS ADDED</p>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : activeSpace.items.map((item, idx) => (
-                    <tr key={item.id} className="group hover:bg-[#FAF9F6]/40 transition-colors">
-                      <td className="px-12 py-9">
-                        {isEditing ? (
-                          <input 
-                            className="font-bold text-lg w-full outline-none bg-transparent border-b border-[#E8DCC4] py-1 focus:border-[#8B6B4D]" 
-                            value={item.name} 
-                            onChange={(e) => {
-                              const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.map(i => i.id === item.id ? {...i, name: e.target.value} : i) } : s);
-                              syncToCloud({...stagingData, spaces: newSpaces});
-                            }} 
-                          />
-                        ) : (
-                          <div className="flex items-baseline gap-5">
-                            <span className="text-[10px] font-sans font-bold text-[#D4C3A3] tabular-nums">{(idx + 1).toString().padStart(2, '0')}</span>
-                            <span className="font-bold text-xl text-[#2D241E]">{item.name}</span>
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-12 py-9">
-                        {isEditing ? (
-                          <input 
-                            className="w-full outline-none bg-transparent border-b border-[#E8DCC4] py-1 font-sans text-sm focus:border-[#8B6B4D]" 
-                            value={item.size} 
-                            onChange={(e) => {
-                              const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.map(i => i.id === item.id ? {...i, size: e.target.value} : i) } : s);
-                              syncToCloud({...stagingData, spaces: newSpaces});
-                            }} 
-                          />
-                        ) : <span className="font-sans text-sm text-[#8B6B4D] font-medium leading-relaxed">{item.size}</span>}
-                      </td>
-                      <td className="px-12 py-9 text-right">
-                        {isEditing ? (
-                          <div className="inline-flex items-center gap-2 bg-[#FAF9F6] p-2 rounded-xl border border-[#E8DCC4]/30">
-                            <span className="text-xs opacity-30">$</span>
-                            <input 
-                              type="number" 
-                              className="text-right w-24 outline-none bg-transparent font-sans font-bold" 
-                              value={item.price} 
-                              onChange={(e) => {
-                                const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.map(i => i.id === item.id ? {...i, price: parseInt(e.target.value) || 0} : i) } : s);
-                                syncToCloud({...stagingData, spaces: newSpaces});
-                              }} 
-                            />
-                          </div>
-                        ) : (
-                          <div className="flex items-baseline justify-end gap-1">
-                            <span className="text-xs opacity-30 font-light">$</span>
-                            <span className="font-sans font-bold text-2xl tracking-tighter text-[#2D241E] tabular-nums">{(item.price || 0).toLocaleString()}</span>
-                          </div>
-                        )}
-                      </td>
-                      {isEditing && (
-                        <td className="px-8 py-9 text-right">
-                          <button 
-                            onClick={() => {
-                              const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.filter(i => i.id !== item.id) } : s);
-                              syncToCloud({...stagingData, spaces: newSpaces});
-                            }} 
-                            className="text-[#E8DCC4] hover:text-red-400 transition-colors"
-                          >
-                            <Trash2 size={18} />
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                  {/* Space Footer */}
-                  <tr className="bg-[#FDFBF7]/50">
-                    <td colSpan={2} className="px-12 py-8 text-right font-sans font-bold text-[#D4C3A3] text-[10px] uppercase tracking-[0.4em]">Space Subtotal</td>
-                    <td className="px-12 py-8 text-right">
-                      <div className="flex items-baseline justify-end gap-1">
-                        <span className="text-xs opacity-30">$</span>
-                        <span className="font-sans font-bold text-3xl tracking-tighter text-[#8B6B4D] tabular-nums">
-                          ${(activeSpace?.items?.reduce((as, i) => as + (Number(i.price) || 0), 0) || 0).toLocaleString()}
-                        </span>
-                      </div>
-                    </td>
-                    {isEditing && <td></td>}
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
         </div>
-      </main>
-
-      <footer className="max-w-7xl mx-auto p-20 text-center opacity-40">
-        <div className="w-16 h-[1px] bg-[#8B6B4D] mx-auto mb-10"></div>
-        <p className="text-[9px] font-sans font-bold text-[#2D241E] uppercase tracking-[0.6em] m-0">Designed & Curated by Home Staging Portfolio</p>
-        <p className="text-[8px] font-sans mt-4 tracking-widest opacity-60">© 2024 ALL RIGHTS RESERVED</p>
-      </footer>
+      </div>
     </div>
   );
 }
