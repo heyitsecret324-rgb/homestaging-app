@@ -1,59 +1,38 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { 
-  Home, Sofa, Utensils, Bath, Bed, Sun, Package, 
-  CheckCircle2, Plus, Trash2, 
-  Layout, Coffee, Waves, Monitor, Armchair,
-  Lamp, Flower2, Check, PencilLine, Share2,
-  Image as ImageIcon, Upload, MapPin
+  Home, CheckCircle2, Plus, Trash2, 
+  Check, PencilLine, Share2, MapPin
 } from 'lucide-react';
 
 /**
- * [重要] 請替換為你自己的 Firebase Config
+ * 注意：在本地開發環境中，環境會自動注入 __firebase_config 與 __initial_auth_token。
+ * 這裡的 appId 必須與 Firestore 路徑中的 appId 一致。
  */
-const firebaseConfig = {
-  apiKey: "AIzaSyA8MOkIEyWQf17TYKpmMynv6HHmIepux8Y",
-  authDomain: "home-staging-portfolio.firebaseapp.com",
-  projectId: "home-staging-portfolio",
-  storageBucket: "home-staging-portfolio.firebasestorage.app",
-  messagingSenderId: "725258548325",
-  appId: "1:725258548325:web:54f29da99eb4c9619fc28c"
-};
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const firebaseConfig = typeof __firebase_config !== 'undefined' 
+  ? JSON.parse(__firebase_config) 
+  : {
+      apiKey: "",
+      authDomain: "",
+      projectId: "homestaging-v1",
+      storageBucket: "",
+      messagingSenderId: "",
+      appId: ""
+    };
 
+const appId = typeof __app_id !== 'undefined' ? __app_id : "homestaging-v1";
+
+// 初始化 Firebase 實例
 let app, auth, db;
 if (getApps().length === 0) {
   app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
 } else {
   app = getApps()[0];
-  auth = getAuth(app);
-  db = getFirestore(app);
 }
-
-const ICON_OPTIONS = [
-  { id: 'Sofa', component: <Sofa className="w-6 h-6" /> },
-  { id: 'Utensils', component: <Utensils className="w-6 h-6" /> },
-  { id: 'Bath', component: <Bath className="w-6 h-6" /> },
-  { id: 'Bed', component: <Bed className="w-6 h-6" /> },
-  { id: 'Layout', component: <Layout className="w-6 h-6" /> }
-];
-
-const DEFAULT_DATA = {
-  projectInfo: { 
-    name: "新建軟裝提案", 
-    address: "請輸入案件地址...",
-    peopleCount: "2位大人", 
-    styleDesc: "北歐簡約風",
-    colorPalette: "原木色、米白"
-  },
-  spaces: [
-    { id: "s1", name: "客廳", iconId: "Sofa", items: [] }
-  ]
-};
+auth = getAuth(app);
+db = getFirestore(app);
 
 export default function App() {
   const [stagingData, setStagingData] = useState(null); 
@@ -65,31 +44,39 @@ export default function App() {
   
   const hasLoadedInitial = useRef(false);
 
-  // 1. 初始化驗證 (遵循 RULE 3)
+  // 處理身份驗證 (遵守 Rule 3)
   useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const pid = urlParams.get('project') || 'demo_project';
+    setProjectId(pid);
+
     const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      } else {
-        await signInAnonymously(auth);
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth Error:", err);
       }
     };
+    
     initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+    });
     return () => unsubscribe();
   }, []);
 
-  // 2. 處理專案 ID
+  // 監聽數據 (遵守 Rule 1 & 2)
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    setProjectId(urlParams.get('project') || 'p_demo');
-  }, []);
+    // 關鍵：必須等待 user 登入完成後才能發起 Firestore 請求
+    if (!projectId || !user || !db) return;
 
-  // 3. 監聽資料 (遵循 RULE 1)
-  useEffect(() => {
-    if (!user || !projectId) return;
-
+    // 嚴格遵守路徑規範：/artifacts/{appId}/public/data/{collectionName}/{docId}
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'projects', projectId);
+    
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -99,22 +86,28 @@ export default function App() {
           hasLoadedInitial.current = true;
         }
       } else {
-        setStagingData(DEFAULT_DATA);
-        setActiveSpaceId(DEFAULT_DATA.spaces[0].id);
-        setDoc(docRef, DEFAULT_DATA);
+        // 如果文檔不存在，初始化一個預設值
+        const defaultData = {
+          projectInfo: { name: "新建軟裝提案", address: "未設定地址", styleDesc: "北歐簡約" },
+          spaces: [{ id: "s1", name: "客廳", items: [] }]
+        };
+        setStagingData(defaultData);
+        setActiveSpaceId("s1");
+        setDoc(docRef, defaultData).catch(e => console.error("Initial setDoc error:", e));
       }
     }, (err) => {
       console.error("Firestore Error:", err);
+      // 這裡如果出現權限錯誤，通常是因為路徑不符合 /artifacts/... 規範
     });
-
+    
     return () => unsubscribe();
-  }, [user, projectId]);
+  }, [projectId, user]);
 
   const syncToCloud = async (newData) => {
-    if (!user || !projectId) return;
+    if (!user || !db || !projectId) return;
     setStagingData(newData);
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'projects', projectId);
-    await setDoc(docRef, newData);
+    await setDoc(docRef, newData).catch(console.error);
   };
 
   const activeSpace = useMemo(() => 
@@ -122,115 +115,192 @@ export default function App() {
     [stagingData, activeSpaceId]
   );
 
-  const copyShareLink = () => {
-    const shareUrl = `${window.location.origin}${window.location.pathname}?project=${projectId}`;
-    const textArea = document.createElement("textarea");
-    textArea.value = shareUrl;
-    document.body.appendChild(textArea);
-    textArea.select();
-    document.execCommand('copy');
-    document.body.removeChild(textArea);
-    setCopyFeedback(true);
-    setTimeout(() => setCopyFeedback(false), 2000);
-  };
+  const totalBudget = useMemo(() => {
+    return stagingData?.spaces?.reduce((sum, s) => {
+      return sum + (s.items?.reduce((as, i) => as + (Number(i.price) || 0), 0) || 0);
+    }, 0) || 0;
+  }, [stagingData]);
 
-  if (!stagingData) return <div className="flex h-screen items-center justify-center bg-[#F8F5F1] text-[#8B6B4D]">載入專案中...</div>;
+  if (!stagingData) return (
+    <div className="flex h-screen items-center justify-center bg-[#F8F5F1]">
+      <div className="text-center animate-pulse">
+        <Home className="w-12 h-12 text-[#8B6B4D] mx-auto mb-4" />
+        <p className="text-[#8B6B4D] font-serif tracking-widest">正在安全連線並載入提案...</p>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-[#F8F5F1] text-[#4A3728] font-serif pb-20">
-      <header className="bg-white/80 backdrop-blur-md border-b border-[#E8DCC4] p-4 sticky top-0 z-50 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <div className="bg-[#8B6B4D] p-2 rounded-xl text-white"><Home className="w-5 h-5" /></div>
-          <div>
-            <h1 className="font-bold text-lg">你家的好表</h1>
-            <p className="text-[9px] tracking-widest text-[#A68B6D] uppercase">Home Staging Portfolio</p>
+    <div className="min-h-screen bg-[#F8F5F1] text-[#4A3728] font-serif">
+      <style>{`
+        #root { width: 100% !important; max-width: 100% !important; margin: 0 !important; border: none !important; text-align: left !important; display: block !important; }
+        @media print { .print-hidden { display: none !important; } }
+      `}</style>
+
+      <header className="bg-white/80 backdrop-blur-md border-b border-[#E8DCC4] p-4 sticky top-0 z-50 shadow-sm print-hidden">
+        <div className="max-w-6xl mx-auto flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <div className="bg-[#8B6B4D] p-2 rounded-xl text-white shadow-md"><Home className="w-5 h-5" /></div>
+            <div>
+              <h1 className="font-bold text-lg leading-tight m-0">你家的好表</h1>
+              <p className="text-[9px] tracking-widest text-[#A68B6D] uppercase font-sans m-0">Home Staging Portfolio</p>
+            </div>
           </div>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={copyShareLink} className="px-4 py-2 bg-white border border-[#E8DCC4] rounded-full text-xs flex items-center gap-2 hover:bg-gray-50 transition-all shadow-sm">
-            {copyFeedback ? <Check className="w-3 h-3 text-green-500" /> : <Share2 className="w-3 h-3" />} 分享
-          </button>
-          <button onClick={() => setIsEditing(!isEditing)} className={`px-4 py-2 rounded-full text-xs flex items-center gap-2 shadow-md transition-all ${isEditing ? 'bg-[#8B6B4D] text-white' : 'bg-white border border-[#E8DCC4]'}`}>
-            {isEditing ? <CheckCircle2 className="w-3 h-3" /> : <PencilLine className="w-3 h-3" />} {isEditing ? '完成' : '編輯'}
-          </button>
+          <div className="flex gap-2 text-xs">
+            <span className="hidden md:flex items-center text-[#A68B6D] mr-2">
+              ID: {user?.uid.slice(0,8)}...
+            </span>
+            <button 
+              onClick={() => {
+                const el = document.createElement('input');
+                el.value = window.location.href;
+                document.body.appendChild(el);
+                el.select();
+                document.execCommand('copy');
+                document.body.removeChild(el);
+                setCopyFeedback(true);
+                setTimeout(() => setCopyFeedback(false), 2000);
+              }} 
+              className="px-4 py-2 bg-white border border-[#E8DCC4] rounded-full flex items-center gap-2 hover:bg-[#FDFBF7] transition-all"
+            >
+              {copyFeedback ? <Check className="w-3 h-3 text-green-500" /> : <Share2 className="w-3 h-3" />} 分享連結
+            </button>
+            <button 
+              onClick={() => setIsEditing(!isEditing)} 
+              className={`px-5 py-2 rounded-full font-bold flex items-center gap-2 transition-all ${isEditing ? 'bg-[#8B6B4D] text-white shadow-lg' : 'bg-white border border-[#E8DCC4]'}`}
+            >
+              {isEditing ? <CheckCircle2 className="w-3.5 h-3.5" /> : <PencilLine className="w-3.5 h-3.5" />} {isEditing ? '完成編輯' : '編輯提案'}
+            </button>
+          </div>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto p-6 space-y-6">
-        <section className="bg-white rounded-3xl p-8 border border-[#E8DCC4] shadow-sm flex flex-col md:flex-row gap-8">
-          <div className="flex-1 space-y-4">
-            <label className="text-[10px] font-bold text-[#D4C3A3] uppercase tracking-widest block">Project Overview</label>
+      <main className="max-w-6xl mx-auto p-6 md:p-10 space-y-10">
+        <section className="bg-white rounded-[2.5rem] p-8 md:p-12 border border-[#E8DCC4] shadow-xl shadow-[#8B6B4D]/5 flex flex-col md:flex-row justify-between items-center gap-8 relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-2 h-full bg-[#8B6B4D]"></div>
+          <div className="space-y-4 flex-1 w-full">
+            <div className="inline-block px-3 py-1 bg-[#FDFBF7] border border-[#E8DCC4] rounded-full text-[10px] font-bold text-[#A68B6D] uppercase tracking-widest">Project Proposal</div>
             {isEditing ? (
-              <input className="text-3xl font-bold w-full border-b border-gray-100 outline-none" value={stagingData.projectInfo.name} onChange={(e) => syncToCloud({...stagingData, projectInfo: {...stagingData.projectInfo, name: e.target.value}})} />
-            ) : <h2 className="text-3xl font-bold">{stagingData.projectInfo.name}</h2>}
-            <p className="flex items-center gap-2 text-sm text-[#A68B6D]"><MapPin className="w-4 h-4" /> {stagingData.projectInfo.address}</p>
+              <input 
+                className="text-4xl font-bold w-full border-b border-[#E8DCC4] outline-none bg-transparent py-2"
+                value={stagingData.projectInfo.name} 
+                onChange={(e) => syncToCloud({...stagingData, projectInfo: {...stagingData.projectInfo, name: e.target.value}})}
+              />
+            ) : <h2 className="text-4xl font-bold m-0 break-words">{stagingData.projectInfo.name}</h2>}
+            <div className="flex flex-wrap items-center gap-4 text-sm text-[#A68B6D]">
+              <p className="flex items-center gap-2"><MapPin className="w-4 h-4" /> {stagingData.projectInfo.address}</p>
+              <p className="px-3 py-1 bg-[#FDFBF7] rounded-lg border border-[#E8DCC4]/50">風格：{stagingData.projectInfo.styleDesc}</p>
+            </div>
           </div>
-          <div className="md:w-64 bg-[#FDFBF7] p-6 rounded-2xl border border-[#F2E8D5]">
-            <p className="text-xs text-[#8B6B4D] mb-1 font-bold">風格預設</p>
-            <p className="text-lg font-bold">{stagingData.projectInfo.styleDesc}</p>
+          <div className="bg-[#4A3728] text-white p-8 rounded-[2rem] min-w-[240px] text-center shadow-2xl">
+            <p className="text-[10px] opacity-60 uppercase tracking-widest mb-1">Total Estimate</p>
+            <p className="text-4xl font-bold font-sans tracking-tighter">${totalBudget.toLocaleString()}</p>
           </div>
         </section>
 
-        <div className="flex flex-col md:flex-row gap-6">
-          <aside className="w-full md:w-56 space-y-2">
+        <div className="flex flex-col md:flex-row gap-8">
+          <aside className="w-full md:w-60 space-y-3 print-hidden">
+            <p className="text-[10px] font-bold text-[#D4C3A3] uppercase tracking-widest px-4">Spaces</p>
             {stagingData.spaces.map(s => (
-              <button key={s.id} onClick={() => setActiveSpaceId(s.id)} className={`w-full text-left px-5 py-4 rounded-2xl transition-all flex items-center gap-3 font-bold border ${activeSpaceId === s.id ? 'bg-[#8B6B4D] text-white border-[#8B6B4D] shadow-lg' : 'bg-white text-[#8B6B4D] border-[#E8DCC4] hover:bg-gray-50'}`}>
-                <Layout className="w-4 h-4" /> {s.name}
+              <button 
+                key={s.id} 
+                onClick={() => setActiveSpaceId(s.id)} 
+                className={`w-full text-left px-6 py-4 rounded-2xl transition-all font-bold ${activeSpaceId === s.id ? 'bg-[#8B6B4D] text-white shadow-lg translate-x-2' : 'bg-white text-[#8B6B4D] border border-[#E8DCC4] hover:bg-white/50'}`}
+              >
+                {s.name}
               </button>
             ))}
+            {isEditing && (
+              <button 
+                onClick={() => {
+                  const newId = `s${Date.now()}`;
+                  syncToCloud({ ...stagingData, spaces: [...stagingData.spaces, { id: newId, name: "新空間", items: [] }] });
+                }} 
+                className="w-full p-4 border-2 border-dashed border-[#E8DCC4] rounded-2xl text-[#D4C3A3] hover:text-[#8B6B4D] flex items-center justify-center gap-2 transition-all"
+              >
+                <Plus className="w-4 h-4" /> 新增場域
+              </button>
+            )}
           </aside>
 
-          <section className="flex-1 bg-white rounded-3xl shadow-sm border border-[#E8DCC4] overflow-hidden">
-            <div className="p-6 border-b border-[#F2E8D5] flex justify-between items-center bg-[#FDFBF7]">
-              <h3 className="font-bold text-lg">{activeSpace?.name} 清單</h3>
+          <section className="flex-1 bg-white rounded-[2rem] border border-[#E8DCC4] overflow-hidden shadow-sm">
+            <div className="p-8 border-b border-[#F2E8D5] flex flex-wrap justify-between items-center bg-[#FDFBF7]/50 gap-4">
+              <h3 className="font-bold text-xl m-0">{activeSpace?.name} 家具清單</h3>
               {isEditing && (
-                <button onClick={() => {
-                  const newItem = { id: `i${Date.now()}`, name: "新項目", size: "", price: 0 };
-                  const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: [...(s.items || []), newItem] } : s);
-                  syncToCloud({ ...stagingData, spaces: newSpaces });
-                }} className="bg-[#4A3728] text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-md">
-                  <Plus className="w-4 h-4" /> 增加品項
+                <button 
+                  onClick={() => {
+                    const newItem = { id: `i${Date.now()}`, name: "新家具品項", size: "標準規格", price: 0 };
+                    const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: [...(s.items || []), newItem] } : s);
+                    syncToCloud({ ...stagingData, spaces: newSpaces });
+                  }} 
+                  className="bg-[#8B6B4D] text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-[#4A3728] transition-colors flex items-center gap-2 shadow-md"
+                >
+                  <Plus className="w-4 h-4" /> 新增品項
                 </button>
               )}
             </div>
             
             <div className="overflow-x-auto">
-              <table className="w-full text-left">
+              <table className="w-full text-left min-w-[500px]">
                 <thead>
-                  <tr className="bg-[#FDFBF7] text-[10px] uppercase tracking-widest font-bold text-[#A68B6D] border-b border-[#F2E8D5]">
-                    <th className="p-6">項目名稱</th>
-                    <th className="p-6">規格尺寸</th>
-                    <th className="p-6 text-right">預算</th>
-                    {isEditing && <th className="p-6 w-12"></th>}
+                  <tr className="text-[10px] uppercase tracking-widest text-[#A68B6D] border-b border-[#F2E8D5]">
+                    <th className="p-8">品項 Item</th>
+                    <th className="p-8">規格 Size</th>
+                    <th className="p-8 text-right">單價 Price</th>
+                    {isEditing && <th className="p-8 w-12"></th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#F2E8D5]">
                   {activeSpace?.items?.map(item => (
-                    <tr key={item.id} className="hover:bg-gray-50/50">
-                      <td className="p-6">
-                        {isEditing ? <input className="font-bold text-sm w-full outline-none bg-transparent" value={item.name} onChange={(e) => {
-                          const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.map(i => i.id === item.id ? {...i, name: e.target.value} : i) } : s);
-                          syncToCloud({...stagingData, spaces: newSpaces});
-                        }} /> : <span className="font-bold text-sm">{item.name}</span>}
+                    <tr key={item.id} className="hover:bg-[#FDFBF7]/30 transition-colors">
+                      <td className="p-8">
+                        {isEditing ? (
+                          <input 
+                            className="font-bold text-base w-full outline-none bg-transparent border-b border-[#E8DCC4]" 
+                            value={item.name} 
+                            onChange={(e) => {
+                              const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.map(i => i.id === item.id ? {...i, name: e.target.value} : i) } : s);
+                              syncToCloud({...stagingData, spaces: newSpaces});
+                            }} 
+                          />
+                        ) : <span className="font-bold text-base">{item.name}</span>}
                       </td>
-                      <td className="p-6">
-                        {isEditing ? <input className="text-xs text-gray-500 w-full outline-none bg-transparent" value={item.size} onChange={(e) => {
-                          const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.map(i => i.id === item.id ? {...i, size: e.target.value} : i) } : s);
-                          syncToCloud({...stagingData, spaces: newSpaces});
-                        }} /> : <span className="text-xs text-gray-500">{item.size}</span>}
+                      <td className="p-8 text-sm text-[#A68B6D]">
+                        {isEditing ? (
+                          <input 
+                            className="w-full outline-none bg-transparent" 
+                            value={item.size} 
+                            onChange={(e) => {
+                              const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.map(i => i.id === item.id ? {...i, size: e.target.value} : i) } : s);
+                              syncToCloud({...stagingData, spaces: newSpaces});
+                            }} 
+                          />
+                        ) : item.size}
                       </td>
-                      <td className="p-6 text-right font-bold text-[#8B6B4D]">
-                        {isEditing ? <input type="number" className="text-right w-24 outline-none" value={item.price} onChange={(e) => {
-                          const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.map(i => i.id === item.id ? {...i, price: parseInt(e.target.value) || 0} : i) } : s);
-                          syncToCloud({...stagingData, spaces: newSpaces});
-                        }} /> : `$${item.price.toLocaleString()}`}
+                      <td className="p-8 text-right font-bold text-[#8B6B4D] font-sans">
+                        {isEditing ? (
+                          <input 
+                            type="number" 
+                            className="text-right w-24 outline-none border-b border-[#E8DCC4]" 
+                            value={item.price} 
+                            onChange={(e) => {
+                              const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.map(i => i.id === item.id ? {...i, price: parseInt(e.target.value) || 0} : i) } : s);
+                              syncToCloud({...stagingData, spaces: newSpaces});
+                            }} 
+                          />
+                        ) : `$${item.price.toLocaleString()}`}
                       </td>
                       {isEditing && (
-                        <td className="p-6">
-                          <button onClick={() => {
-                            const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.filter(i => i.id !== item.id) } : s);
-                            syncToCloud({...stagingData, spaces: newSpaces});
-                          }} className="text-red-300 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                        <td className="p-8 text-right">
+                          <button 
+                            onClick={() => {
+                              const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.filter(i => i.id !== item.id) } : s);
+                              syncToCloud({...stagingData, spaces: newSpaces});
+                            }} 
+                            className="text-red-300 hover:text-red-500 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </td>
                       )}
                     </tr>
