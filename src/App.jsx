@@ -5,11 +5,12 @@ import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { 
   Home, CheckCircle2, Plus, Trash2, 
   Check, PencilLine, Share2, MapPin, 
-  Printer, Layout, ArrowRight, Layers
+  Printer, Layout, ArrowRight, Layers,
+  ChevronRight, Calendar
 } from 'lucide-react';
 
 /**
- * 環境變數讀取與 Firebase 初始化 (保留您原始版本的所有防錯邏輯)
+ * 環境變數讀取與 Firebase 初始化
  */
 function pickViteEnv(key, fallback = '') {
   try {
@@ -67,10 +68,9 @@ export default function App() {
   
   const hasLoadedInitial = useRef(false);
 
-  // 身份驗證監聽
   useEffect(() => {
     if (!auth) {
-      setInitError('Firebase Auth 尚未初始化，請檢查環境變數。');
+      setInitError('Firebase Auth 尚未初始化');
       setLoading(false);
       return;
     }
@@ -97,7 +97,6 @@ export default function App() {
     });
   }, []);
 
-  // 數據即時監聽
   useEffect(() => {
     if (!projectId || !user || !db) return;
 
@@ -149,58 +148,56 @@ export default function App() {
     }, 0);
   }, [stagingData]);
 
-  // 載入畫面
   if (loading && !initError) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[#FDFBF7]">
+      <div className="flex h-screen items-center justify-center bg-[#FAF9F6]">
         <div className="text-center">
-          <div className="w-10 h-10 border-2 border-[#8B6B4D] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-[#8B6B4D] font-serif tracking-[0.2em] text-xs uppercase animate-pulse">Establishing Connection...</p>
+          <div className="w-12 h-12 border-2 border-[#8B6B4D] border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
+          <p className="text-[#8B6B4D] font-serif tracking-[0.3em] text-xs uppercase">Connecting to Database</p>
         </div>
       </div>
     );
   }
 
-  // 錯誤處理
   if (initError) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[#FDFBF7] p-6">
-        <div className="max-w-md w-full bg-white border border-red-100 p-8 rounded-[2rem] shadow-xl text-center">
-          <div className="w-12 h-12 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Layers size={24} />
-          </div>
-          <h3 className="font-bold text-lg text-red-900 mb-2">連線初始化失敗</h3>
-          <p className="text-sm text-red-600/70 mb-6 leading-relaxed">{initError}</p>
-          <button onClick={() => window.location.reload()} className="px-6 py-2 bg-red-500 text-white rounded-full text-sm font-bold">重新嘗試</button>
+      <div className="flex h-screen items-center justify-center bg-[#FAF9F6] p-6">
+        <div className="max-w-md w-full bg-white border border-red-50 p-10 rounded-[3rem] shadow-2xl text-center">
+          <Layers size={32} className="text-red-300 mx-auto mb-6" />
+          <h3 className="font-bold text-xl text-[#2D241E] mb-4">初始化異常</h3>
+          <p className="text-sm text-[#A68B6D] mb-8 leading-relaxed">{initError}</p>
+          <button onClick={() => window.location.reload()} className="w-full py-4 bg-[#2D241E] text-white rounded-2xl text-sm font-bold tracking-widest">RELOAD PAGE</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#FDFBF7] text-[#2D241E] font-serif selection:bg-[#8B6B4D]/10">
+    <div className="min-h-screen bg-[#FAF9F6] text-[#2D241E] font-serif selection:bg-[#8B6B4D]/10">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;700&family=Noto+Sans+TC:wght@300;400;700&display=swap');
         :root { font-family: 'Noto Serif TC', serif; }
         .font-sans { font-family: 'Noto Sans TC', sans-serif; }
         #root { width: 100% !important; max-width: 100% !important; margin: 0 !important; border: none !important; display: block !important; }
         @media print { .print-hidden { display: none !important; } body { background: white; } }
-        .glass { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(12px); }
+        .glass { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(20px); }
+        .slide-up { animation: slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
 
-      {/* 導航欄 */}
-      <header className="glass border-b border-[#E8DCC4]/50 px-6 py-4 sticky top-0 z-50 print-hidden">
+      {/* Header */}
+      <header className="glass border-b border-[#E8DCC4]/30 px-8 py-5 sticky top-0 z-50 print-hidden">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <div className="bg-[#2D241E] w-10 h-10 rounded-full flex items-center justify-center text-[#FDFBF7] shadow-xl">
-              <Layout size={20} />
+          <div className="flex items-center gap-5">
+            <div className="bg-[#2D241E] w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-lg rotate-3">
+              <Layout size={22} />
             </div>
             <div>
               <h1 className="font-bold text-xl tracking-tight m-0 leading-none">你家的好表</h1>
-              <p className="text-[9px] tracking-[0.25em] text-[#A68B6D] uppercase font-sans font-bold m-0 mt-1 opacity-70">Curator Dashboard</p>
+              <p className="text-[9px] tracking-[0.4em] text-[#A68B6D] uppercase font-sans font-bold m-0 mt-1.5 opacity-60">Staging Dashboard v2.0</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
             <button 
               onClick={() => {
                 const el = document.createElement('input');
@@ -212,187 +209,222 @@ export default function App() {
                 setCopyFeedback(true);
                 setTimeout(() => setCopyFeedback(false), 2000);
               }} 
-              className="p-3 bg-white border border-[#E8DCC4] rounded-full text-[#8B6B4D] hover:shadow-lg transition-all"
+              className="p-3 bg-white border border-[#E8DCC4]/50 rounded-full text-[#8B6B4D] hover:bg-[#8B6B4D] hover:text-white transition-all shadow-sm"
             >
-              {copyFeedback ? <Check size={18} className="text-green-600" /> : <Share2 size={18} />}
+              {copyFeedback ? <Check size={18} /> : <Share2 size={18} />}
             </button>
             <button 
               onClick={() => setIsEditing(!isEditing)} 
-              className={`flex items-center gap-2 px-6 py-2.5 rounded-full font-sans text-sm font-bold transition-all ${
-                isEditing ? 'bg-[#8B6B4D] text-white shadow-xl' : 'bg-[#2D241E] text-white shadow-xl'
+              className={`flex items-center gap-3 px-8 py-3 rounded-full font-sans text-xs font-bold tracking-[0.1em] transition-all ${
+                isEditing ? 'bg-[#8B6B4D] text-white shadow-xl scale-105' : 'bg-[#2D241E] text-white shadow-lg'
               }`}
             >
               {isEditing ? <CheckCircle2 size={16} /> : <PencilLine size={16} />}
-              {isEditing ? '儲存提案' : '編輯提案'}
+              {isEditing ? 'FINISH EDIT' : 'EDIT PROPOSAL'}
             </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-10 md:py-16 space-y-12">
-        {/* 封面看板 */}
-        <section className="bg-white rounded-[2.5rem] p-10 md:p-16 border border-[#E8DCC4]/60 shadow-2xl shadow-[#8B6B4D]/5 flex flex-col md:flex-row justify-between items-end gap-10 relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-2 h-full bg-[#8B6B4D]"></div>
-          <div className="space-y-6 flex-1 w-full">
-            <div className="flex items-center gap-3">
-              <span className="w-12 h-[1px] bg-[#8B6B4D]"></span>
-              <span className="text-xs font-sans font-bold text-[#8B6B4D] uppercase tracking-[0.4em]">Staging Proposal</span>
-            </div>
-            {isEditing ? (
-              <div className="space-y-4">
-                <input 
-                  className="text-5xl font-bold w-full border-b border-[#E8DCC4] outline-none bg-transparent py-2 focus:border-[#8B6B4D]"
-                  value={stagingData.projectInfo?.name || ""} 
-                  onChange={(e) => syncToCloud({...stagingData, projectInfo: {...stagingData.projectInfo, name: e.target.value}})}
-                />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input className="font-sans text-sm p-3 bg-[#FDFBF7] rounded-xl outline-none" value={stagingData.projectInfo?.address} onChange={(e) => syncToCloud({...stagingData, projectInfo: {...stagingData.projectInfo, address: e.target.value}})} placeholder="地址" />
-                  <input className="font-sans text-sm p-3 bg-[#FDFBF7] rounded-xl outline-none" value={stagingData.projectInfo?.styleDesc} onChange={(e) => syncToCloud({...stagingData, projectInfo: {...stagingData.projectInfo, styleDesc: e.target.value}})} placeholder="風格描述" />
-                </div>
-              </div>
-            ) : (
-              <>
-                <h2 className="text-5xl md:text-7xl font-bold leading-[1.1] tracking-tight m-0">{stagingData.projectInfo?.name}</h2>
-                <div className="flex flex-wrap items-center gap-6 pt-4 text-[#A68B6D]">
-                  <p className="flex items-center gap-2 m-0 text-lg"><MapPin size={20} /> {stagingData.projectInfo?.address}</p>
-                  <p className="m-0 font-sans font-bold tracking-widest text-sm uppercase px-4 py-1.5 border border-[#E8DCC4] rounded-full">{stagingData.projectInfo?.styleDesc}</p>
-                </div>
-              </>
-            )}
-          </div>
+      <main className="max-w-7xl mx-auto px-8 py-12 md:py-20 space-y-16 slide-up">
+        {/* Project Hero Section */}
+        <section className="relative bg-white rounded-[3rem] p-12 md:p-20 border border-[#E8DCC4]/40 shadow-2xl shadow-[#8B6B4D]/5 overflow-hidden">
+          {/* Decorative Elements */}
+          <div className="absolute top-0 right-0 w-64 h-64 bg-[#FDFBF7] rounded-full -mr-32 -mt-32 z-0"></div>
+          <div className="absolute bottom-0 left-0 w-32 h-1 bg-[#8B6B4D]"></div>
           
-          <div className="w-full md:w-auto bg-[#2D241E] text-white p-10 rounded-[2.5rem] md:min-w-[320px] shadow-2xl">
-            <p className="text-[10px] font-sans font-bold opacity-50 uppercase tracking-[0.3em] mb-4">Estimate Total</p>
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-light opacity-50">$</span>
-              <span className="text-5xl font-sans font-bold tracking-tighter">{totalBudget.toLocaleString()}</span>
+          <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-end gap-12">
+            <div className="flex-1 space-y-8">
+              <div className="flex items-center gap-4">
+                <span className="text-[10px] font-sans font-bold text-[#8B6B4D] uppercase tracking-[0.5em] bg-[#FDFBF7] px-4 py-1.5 rounded-full border border-[#E8DCC4]/30">Interior Proposal</span>
+                <span className="text-[10px] font-sans font-bold text-[#A68B6D] uppercase tracking-[0.2em] opacity-40">/ 2024 Edition</span>
+              </div>
+              
+              {isEditing ? (
+                <div className="space-y-6">
+                  <input 
+                    className="text-5xl md:text-7xl font-bold w-full border-b-2 border-[#E8DCC4] outline-none bg-transparent py-2 focus:border-[#8B6B4D] transition-all"
+                    value={stagingData.projectInfo?.name || ""} 
+                    onChange={(e) => syncToCloud({...stagingData, projectInfo: {...stagingData.projectInfo, name: e.target.value}})}
+                  />
+                  <div className="flex flex-wrap gap-4">
+                    <input className="font-sans text-sm px-5 py-3 bg-[#FAF9F6] rounded-2xl border border-[#E8DCC4]/30 outline-none w-full md:w-auto min-w-[300px]" value={stagingData.projectInfo?.address} onChange={(e) => syncToCloud({...stagingData, projectInfo: {...stagingData.projectInfo, address: e.target.value}})} placeholder="輸入案件地址..." />
+                    <input className="font-sans text-sm px-5 py-3 bg-[#FAF9F6] rounded-2xl border border-[#E8DCC4]/30 outline-none w-full md:w-auto" value={stagingData.projectInfo?.styleDesc} onChange={(e) => syncToCloud({...stagingData, projectInfo: {...stagingData.projectInfo, styleDesc: e.target.value}})} placeholder="風格描述..." />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <h2 className="text-5xl md:text-7xl font-bold leading-[1] tracking-tight m-0 text-[#2D241E]">{stagingData.projectInfo?.name}</h2>
+                  <div className="flex flex-wrap items-center gap-8 text-[#A68B6D]">
+                    <p className="flex items-center gap-2.5 m-0 text-lg font-medium italic"><MapPin size={18} className="text-[#8B6B4D]" /> {stagingData.projectInfo?.address}</p>
+                    <div className="h-4 w-[1px] bg-[#E8DCC4] hidden md:block"></div>
+                    <p className="m-0 font-sans font-bold tracking-widest text-[10px] uppercase bg-[#FAF9F6] px-5 py-2 rounded-full border border-[#E8DCC4]/30">{stagingData.projectInfo?.styleDesc}</p>
+                  </div>
+                </div>
+              )}
             </div>
-            <p className="mt-6 mb-0 text-[11px] font-sans opacity-40 leading-relaxed">此為家具與裝飾之總計估額，<br/>不含現場施工費用。</p>
+
+            {/* Price Tag Box - Refined */}
+            <div className="w-full md:w-[340px] bg-[#2D241E] text-white p-12 rounded-[2.5rem] shadow-3xl transform hover:-translate-y-2 transition-transform duration-500">
+              <div className="flex justify-between items-center mb-6 opacity-40">
+                <p className="text-[10px] font-sans font-bold uppercase tracking-[0.3em] m-0">Project Valuation</p>
+                <Calendar size={14} />
+              </div>
+              <div className="flex items-baseline gap-2 mb-8">
+                <span className="text-2xl font-light opacity-30">$</span>
+                <span className="text-6xl font-sans font-bold tracking-tighter tabular-nums">{totalBudget.toLocaleString()}</span>
+              </div>
+              <div className="space-y-1.5 opacity-30 text-[10px] font-sans leading-relaxed">
+                <p className="m-0">估值僅包含家具與家飾清單</p>
+                <p className="m-0">實際報價依採購當時官網與庫存為準</p>
+              </div>
+            </div>
           </div>
         </section>
 
-        {/* 空間選擇與內容 */}
-        <div className="flex flex-col md:flex-row gap-12">
-          {/* 左側空間切換 */}
-          <aside className="w-full md:w-64 space-y-6 sticky top-28 print-hidden">
-            <p className="text-[10px] font-sans font-bold text-[#D4C3A3] uppercase tracking-[0.3em] mb-6 pl-4 border-l border-[#E8DCC4]">Spaces Inventory</p>
-            <div className="space-y-3">
-              {stagingData.spaces?.map(s => (
-                <button 
-                  key={s.id} 
-                  onClick={() => setActiveSpaceId(s.id)} 
-                  className={`w-full flex items-center justify-between px-6 py-4 rounded-2xl transition-all duration-300 font-bold ${
-                    activeSpaceId === s.id 
-                    ? 'bg-[#8B6B4D] text-[#FDFBF7] shadow-xl translate-x-3' 
-                    : 'bg-white text-[#8B6B4D] border border-[#E8DCC4]/40 hover:bg-[#FDFBF7]'
-                  }`}
-                >
-                  <span>{s.name}</span>
-                  <ArrowRight size={14} className={activeSpaceId === s.id ? 'opacity-100' : 'opacity-0'} />
-                </button>
-              ))}
+        {/* Content Layout */}
+        <div className="flex flex-col md:flex-row gap-16 items-start">
+          {/* Navigation Sidebar */}
+          <aside className="w-full md:w-72 space-y-10 sticky top-32 print-hidden">
+            <div>
+              <p className="text-[10px] font-sans font-bold text-[#8B6B4D] uppercase tracking-[0.4em] mb-6 pl-5 border-l-2 border-[#8B6B4D]">Space Catalog</p>
+              <div className="space-y-4">
+                {stagingData.spaces?.map(s => (
+                  <button 
+                    key={s.id} 
+                    onClick={() => setActiveSpaceId(s.id)} 
+                    className={`w-full flex items-center justify-between px-8 py-5 rounded-[1.5rem] transition-all duration-500 group ${
+                      activeSpaceId === s.id 
+                      ? 'bg-white text-[#2D241E] shadow-2xl shadow-[#8B6B4D]/10 border border-[#E8DCC4]/40 translate-x-4' 
+                      : 'text-[#A68B6D] hover:text-[#8B6B4D] hover:translate-x-2'
+                    }`}
+                  >
+                    <span className={`font-bold text-lg ${activeSpaceId === s.id ? 'opacity-100' : 'opacity-60'}`}>{s.name}</span>
+                    <ChevronRight size={16} className={`transition-all ${activeSpaceId === s.id ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-4'}`} />
+                  </button>
+                ))}
+              </div>
             </div>
 
             {isEditing && (
               <button 
                 onClick={() => {
                   const newId = `s${Date.now()}`;
-                  syncToCloud({ ...stagingData, spaces: [...(stagingData.spaces || []), { id: newId, name: "新空間", items: [] }] });
+                  syncToCloud({ ...stagingData, spaces: [...(stagingData.spaces || []), { id: newId, name: "新場域", items: [] }] });
                 }} 
-                className="w-full p-4 border-2 border-dashed border-[#E8DCC4] rounded-2xl text-[#A68B6D] hover:text-[#8B6B4D] flex items-center justify-center gap-2 transition-all font-sans text-xs font-bold"
+                className="w-full p-6 border-2 border-dashed border-[#E8DCC4] rounded-[1.5rem] text-[#D4C3A3] hover:text-[#8B6B4D] hover:border-[#8B6B4D] flex items-center justify-center gap-3 transition-all font-sans text-[11px] font-bold tracking-widest uppercase"
               >
-                <Plus size={14} /> 新增場域
+                <Plus size={16} /> Add New Space
               </button>
             )}
           </aside>
 
-          {/* 右側表格 */}
-          <section className="flex-1 bg-white rounded-[3rem] border border-[#E8DCC4]/60 shadow-xl overflow-hidden self-start">
-            <div className="px-10 py-8 border-b border-[#FDFBF7] flex justify-between items-center bg-[#FDFBF7]/40">
-              <div className="flex items-center gap-4">
-                <div className="w-2 h-8 bg-[#8B6B4D] rounded-full"></div>
-                <h3 className="font-bold text-2xl tracking-tight">{activeSpace?.name || "請選取空間"} <span className="text-[#A68B6D] font-light ml-2">清單項目</span></h3>
+          {/* Table Content */}
+          <section className="flex-1 w-full bg-white rounded-[3rem] border border-[#E8DCC4]/40 shadow-xl shadow-[#8B6B4D]/5 overflow-hidden">
+            {/* Table Header */}
+            <div className="px-12 py-10 border-b border-[#FAF9F6] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 bg-[#FDFBF7]/50">
+              <div className="flex items-center gap-6">
+                <div className="w-1.5 h-10 bg-[#8B6B4D] rounded-full"></div>
+                <div>
+                  <h3 className="font-bold text-3xl tracking-tight m-0">{activeSpace?.name || "場域內容"}</h3>
+                  <p className="text-[10px] font-sans font-bold text-[#A68B6D] uppercase tracking-[0.3em] mt-1.5">Furniture Inventory & Specs</p>
+                </div>
               </div>
               {isEditing && activeSpace && (
                 <button 
                   onClick={() => {
-                    const newItem = { id: `i${Date.now()}`, name: "新家具品項", size: "規格", price: 0 };
+                    const newItem = { id: `i${Date.now()}`, name: "新家具品項", size: "規格描述", price: 0 };
                     const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: [...(s.items || []), newItem] } : s);
                     syncToCloud({ ...stagingData, spaces: newSpaces });
                   }} 
-                  className="bg-[#2D241E] text-white px-5 py-2.5 rounded-full text-xs font-sans font-bold hover:bg-black transition-all flex items-center gap-2 shadow-lg"
+                  className="bg-[#2D241E] text-white px-8 py-3.5 rounded-full text-xs font-sans font-bold hover:bg-black transition-all flex items-center gap-3 shadow-lg group"
                 >
-                  <Plus size={14} /> 新增品項
+                  <Plus size={14} className="group-hover:rotate-90 transition-transform" /> ADD ITEM
                 </button>
               )}
             </div>
             
+            {/* Table Body */}
             <div className="overflow-x-auto">
-              <table className="w-full text-left min-w-[600px]">
+              <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="text-[10px] font-sans font-bold uppercase tracking-[0.2em] text-[#A68B6D] bg-[#FDFBF7]/30 border-b border-[#FDFBF7]">
-                    <th className="px-10 py-5">品項名稱 Item</th>
-                    <th className="px-10 py-5">規格尺寸 Spec</th>
-                    <th className="px-10 py-5 text-right">估價 Price</th>
-                    {isEditing && <th className="px-6 py-5 w-16"></th>}
+                  <tr className="text-[10px] font-sans font-bold uppercase tracking-[0.25em] text-[#D4C3A3] border-b border-[#FAF9F6]">
+                    <th className="px-12 py-6">Item Description</th>
+                    <th className="px-12 py-6">Specifications</th>
+                    <th className="px-12 py-6 text-right">Estimate</th>
+                    {isEditing && <th className="px-8 py-6 w-20"></th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#FDFBF7]">
-                  {(!activeSpace?.items || activeSpace.items.length === 0) && (
+                <tbody className="divide-y divide-[#FAF9F6]">
+                  {(!activeSpace?.items || activeSpace.items.length === 0) ? (
                     <tr>
-                      <td colSpan={isEditing ? 4 : 3} className="px-10 py-20 text-center opacity-30">
-                        <Layers size={40} className="mx-auto mb-4" />
-                        <p className="font-bold tracking-widest text-xs">此空間尚無家具品項</p>
+                      <td colSpan={isEditing ? 4 : 3} className="px-12 py-32 text-center">
+                        <div className="max-w-[200px] mx-auto opacity-20 space-y-4">
+                          <Layers size={48} className="mx-auto" />
+                          <p className="font-sans font-bold tracking-[0.2em] text-xs">NO ITEMS ADDED</p>
+                        </div>
                       </td>
                     </tr>
-                  )}
-                  {activeSpace?.items?.map((item, idx) => (
-                    <tr key={item.id} className="hover:bg-[#FDFBF7]/30 transition-colors">
-                      <td className="px-10 py-8">
+                  ) : activeSpace.items.map((item, idx) => (
+                    <tr key={item.id} className="group hover:bg-[#FAF9F6]/40 transition-colors">
+                      <td className="px-12 py-9">
                         {isEditing ? (
                           <input 
-                            className="font-bold text-lg w-full outline-none bg-transparent border-b border-[#E8DCC4] py-1" 
+                            className="font-bold text-lg w-full outline-none bg-transparent border-b border-[#E8DCC4] py-1 focus:border-[#8B6B4D]" 
                             value={item.name} 
                             onChange={(e) => {
                               const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.map(i => i.id === item.id ? {...i, name: e.target.value} : i) } : s);
                               syncToCloud({...stagingData, spaces: newSpaces});
                             }} 
                           />
-                        ) : <div className="flex items-center gap-4"><span className="text-[#E8DCC4] font-sans text-xs">{String(idx+1).padStart(2,'0')}</span><span className="font-bold text-lg">{item.name}</span></div>}
+                        ) : (
+                          <div className="flex items-baseline gap-5">
+                            <span className="text-[10px] font-sans font-bold text-[#D4C3A3] tabular-nums">{(idx + 1).toString().padStart(2, '0')}</span>
+                            <span className="font-bold text-xl text-[#2D241E]">{item.name}</span>
+                          </div>
+                        )}
                       </td>
-                      <td className="px-10 py-8 text-[#8B6B4D] font-sans text-sm">
+                      <td className="px-12 py-9">
                         {isEditing ? (
                           <input 
-                            className="w-full outline-none bg-transparent border-b border-[#E8DCC4] py-1" 
+                            className="w-full outline-none bg-transparent border-b border-[#E8DCC4] py-1 font-sans text-sm focus:border-[#8B6B4D]" 
                             value={item.size} 
                             onChange={(e) => {
                               const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.map(i => i.id === item.id ? {...i, size: e.target.value} : i) } : s);
                               syncToCloud({...stagingData, spaces: newSpaces});
                             }} 
                           />
-                        ) : item.size}
+                        ) : <span className="font-sans text-sm text-[#8B6B4D] font-medium leading-relaxed">{item.size}</span>}
                       </td>
-                      <td className="px-10 py-8 text-right font-bold text-[#2D241E] font-sans text-xl">
+                      <td className="px-12 py-9 text-right">
                         {isEditing ? (
-                          <input 
-                            type="number" 
-                            className="text-right w-28 outline-none bg-[#FDFBF7] p-2 rounded-lg border border-[#E8DCC4] font-sans font-bold" 
-                            value={item.price} 
-                            onChange={(e) => {
-                              const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.map(i => i.id === item.id ? {...i, price: parseInt(e.target.value) || 0} : i) } : s);
-                              syncToCloud({...stagingData, spaces: newSpaces});
-                            }} 
-                          />
-                        ) : `$${(item.price || 0).toLocaleString()}`}
+                          <div className="inline-flex items-center gap-2 bg-[#FAF9F6] p-2 rounded-xl border border-[#E8DCC4]/30">
+                            <span className="text-xs opacity-30">$</span>
+                            <input 
+                              type="number" 
+                              className="text-right w-24 outline-none bg-transparent font-sans font-bold" 
+                              value={item.price} 
+                              onChange={(e) => {
+                                const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.map(i => i.id === item.id ? {...i, price: parseInt(e.target.value) || 0} : i) } : s);
+                                syncToCloud({...stagingData, spaces: newSpaces});
+                              }} 
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex items-baseline justify-end gap-1">
+                            <span className="text-xs opacity-30 font-light">$</span>
+                            <span className="font-sans font-bold text-2xl tracking-tighter text-[#2D241E] tabular-nums">{(item.price || 0).toLocaleString()}</span>
+                          </div>
+                        )}
                       </td>
                       {isEditing && (
-                        <td className="px-6 py-8 text-right">
+                        <td className="px-8 py-9 text-right">
                           <button 
                             onClick={() => {
                               const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.filter(i => i.id !== item.id) } : s);
                               syncToCloud({...stagingData, spaces: newSpaces});
                             }} 
-                            className="text-red-300 hover:text-red-500 transition-colors"
+                            className="text-[#E8DCC4] hover:text-red-400 transition-colors"
                           >
                             <Trash2 size={18} />
                           </button>
@@ -400,10 +432,16 @@ export default function App() {
                       )}
                     </tr>
                   ))}
-                  <tr className="bg-[#FDFBF7]/40">
-                    <td colSpan={2} className="px-10 py-6 text-right font-sans font-bold text-[#A68B6D] text-[10px] uppercase tracking-widest">Subtotal</td>
-                    <td className="px-10 py-6 text-right font-sans font-bold text-2xl text-[#8B6B4D]">
-                      ${(activeSpace?.items?.reduce((as, i) => as + (Number(i.price) || 0), 0) || 0).toLocaleString()}
+                  {/* Space Footer */}
+                  <tr className="bg-[#FDFBF7]/50">
+                    <td colSpan={2} className="px-12 py-8 text-right font-sans font-bold text-[#D4C3A3] text-[10px] uppercase tracking-[0.4em]">Space Subtotal</td>
+                    <td className="px-12 py-8 text-right">
+                      <div className="flex items-baseline justify-end gap-1">
+                        <span className="text-xs opacity-30">$</span>
+                        <span className="font-sans font-bold text-3xl tracking-tighter text-[#8B6B4D] tabular-nums">
+                          ${(activeSpace?.items?.reduce((as, i) => as + (Number(i.price) || 0), 0) || 0).toLocaleString()}
+                        </span>
+                      </div>
                     </td>
                     {isEditing && <td></td>}
                   </tr>
@@ -414,9 +452,10 @@ export default function App() {
         </div>
       </main>
 
-      <footer className="max-w-7xl mx-auto p-12 text-center print-hidden">
-        <div className="w-12 h-[1px] bg-[#E8DCC4] mx-auto mb-6"></div>
-        <p className="text-[10px] font-sans font-bold text-[#D4C3A3] uppercase tracking-[0.5em] m-0">Curated by Home Staging Portfolio</p>
+      <footer className="max-w-7xl mx-auto p-20 text-center opacity-40">
+        <div className="w-16 h-[1px] bg-[#8B6B4D] mx-auto mb-10"></div>
+        <p className="text-[9px] font-sans font-bold text-[#2D241E] uppercase tracking-[0.6em] m-0">Designed & Curated by Home Staging Portfolio</p>
+        <p className="text-[8px] font-sans mt-4 tracking-widest opacity-60">© 2024 ALL RIGHTS RESERVED</p>
       </footer>
     </div>
   );
