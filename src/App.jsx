@@ -1,4 +1,4 @@
-
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
@@ -8,31 +8,40 @@ import {
 } from 'lucide-react';
 
 /**
- * 注意：在本地開發環境中，環境會自動注入 __firebase_config 與 __initial_auth_token。
- * 這裡的 appId 必須與 Firestore 路徑中的 appId 一致。
+ * 錯誤修正：加強對環境變數的檢查，避免 Script Error 崩潰
  */
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
-  ? JSON.parse(__firebase_config) 
-  : {
-      apiKey: "",
-      authDomain: "",
-      projectId: "homestaging-v1",
-      storageBucket: "",
-      messagingSenderId: "",
-      appId: ""
-    };
+let firebaseConfig = {
+  apiKey: "",
+  authDomain: "",
+  projectId: "homestaging-v1",
+  storageBucket: "",
+  messagingSenderId: "",
+  appId: ""
+};
+
+try {
+  if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+    firebaseConfig = JSON.parse(__firebase_config);
+  }
+} catch (e) {
+  console.error("Firebase config parse error", e);
+}
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : "homestaging-v1";
 
-// 初始化 Firebase 實例
+// 初始化 Firebase 實例並封裝在 try-catch 中
 let app, auth, db;
-if (getApps().length === 0) {
-  app = initializeApp(firebaseConfig);
-} else {
-  app = getApps()[0];
+try {
+  if (getApps().length === 0) {
+    app = initializeApp(firebaseConfig);
+  } else {
+    app = getApps()[0];
+  }
+  auth = getAuth(app);
+  db = getFirestore(app);
+} catch (error) {
+  console.error("Firebase init failed", error);
 }
-auth = getAuth(app);
-db = getFirestore(app);
 
 export default function App() {
   const [stagingData, setStagingData] = useState(null); 
@@ -44,8 +53,10 @@ export default function App() {
   
   const hasLoadedInitial = useRef(false);
 
-  // 處理身份驗證 (遵守 Rule 3)
+  // 處理身份驗證
   useEffect(() => {
+    if (!auth) return;
+
     const urlParams = new URLSearchParams(window.location.search);
     const pid = urlParams.get('project') || 'demo_project';
     setProjectId(pid);
@@ -58,7 +69,7 @@ export default function App() {
           await signInAnonymously(auth);
         }
       } catch (err) {
-        console.error("Auth Error:", err);
+        console.error("Auth process error:", err);
       }
     };
     
@@ -69,12 +80,10 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 監聽數據 (遵守 Rule 1 & 2)
+  // 監聽數據
   useEffect(() => {
-    // 關鍵：必須等待 user 登入完成後才能發起 Firestore 請求
     if (!projectId || !user || !db) return;
 
-    // 嚴格遵守路徑規範：/artifacts/{appId}/public/data/{collectionName}/{docId}
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'projects', projectId);
     
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
@@ -86,7 +95,6 @@ export default function App() {
           hasLoadedInitial.current = true;
         }
       } else {
-        // 如果文檔不存在，初始化一個預設值
         const defaultData = {
           projectInfo: { name: "新建軟裝提案", address: "未設定地址", styleDesc: "北歐簡約" },
           spaces: [{ id: "s1", name: "客廳", items: [] }]
@@ -96,8 +104,7 @@ export default function App() {
         setDoc(docRef, defaultData).catch(e => console.error("Initial setDoc error:", e));
       }
     }, (err) => {
-      console.error("Firestore Error:", err);
-      // 這裡如果出現權限錯誤，通常是因為路徑不符合 /artifacts/... 規範
+      console.error("Firestore error in snapshot:", err);
     });
     
     return () => unsubscribe();
@@ -116,16 +123,18 @@ export default function App() {
   );
 
   const totalBudget = useMemo(() => {
-    return stagingData?.spaces?.reduce((sum, s) => {
-      return sum + (s.items?.reduce((as, i) => as + (Number(i.price) || 0), 0) || 0);
-    }, 0) || 0;
+    if (!stagingData?.spaces) return 0;
+    return stagingData.spaces.reduce((sum, s) => {
+      const spaceTotal = s.items?.reduce((as, i) => as + (Number(i.price) || 0), 0) || 0;
+      return sum + spaceTotal;
+    }, 0);
   }, [stagingData]);
 
   if (!stagingData) return (
     <div className="flex h-screen items-center justify-center bg-[#F8F5F1]">
       <div className="text-center animate-pulse">
         <Home className="w-12 h-12 text-[#8B6B4D] mx-auto mb-4" />
-        <p className="text-[#8B6B4D] font-serif tracking-widest">正在安全連線並載入提案...</p>
+        <p className="text-[#8B6B4D] font-serif tracking-widest">初始化中，請稍候...</p>
       </div>
     </div>
   );
@@ -147,9 +156,6 @@ export default function App() {
             </div>
           </div>
           <div className="flex gap-2 text-xs">
-            <span className="hidden md:flex items-center text-[#A68B6D] mr-2">
-              ID: {user?.uid.slice(0,8)}...
-            </span>
             <button 
               onClick={() => {
                 const el = document.createElement('input');
@@ -183,13 +189,13 @@ export default function App() {
             {isEditing ? (
               <input 
                 className="text-4xl font-bold w-full border-b border-[#E8DCC4] outline-none bg-transparent py-2"
-                value={stagingData.projectInfo.name} 
+                value={stagingData.projectInfo?.name || ""} 
                 onChange={(e) => syncToCloud({...stagingData, projectInfo: {...stagingData.projectInfo, name: e.target.value}})}
               />
-            ) : <h2 className="text-4xl font-bold m-0 break-words">{stagingData.projectInfo.name}</h2>}
+            ) : <h2 className="text-4xl font-bold m-0 break-words">{stagingData.projectInfo?.name}</h2>}
             <div className="flex flex-wrap items-center gap-4 text-sm text-[#A68B6D]">
-              <p className="flex items-center gap-2"><MapPin className="w-4 h-4" /> {stagingData.projectInfo.address}</p>
-              <p className="px-3 py-1 bg-[#FDFBF7] rounded-lg border border-[#E8DCC4]/50">風格：{stagingData.projectInfo.styleDesc}</p>
+              <p className="flex items-center gap-2"><MapPin className="w-4 h-4" /> {stagingData.projectInfo?.address}</p>
+              <p className="px-3 py-1 bg-[#FDFBF7] rounded-lg border border-[#E8DCC4]/50">風格：{stagingData.projectInfo?.styleDesc}</p>
             </div>
           </div>
           <div className="bg-[#4A3728] text-white p-8 rounded-[2rem] min-w-[240px] text-center shadow-2xl">
@@ -201,7 +207,7 @@ export default function App() {
         <div className="flex flex-col md:flex-row gap-8">
           <aside className="w-full md:w-60 space-y-3 print-hidden">
             <p className="text-[10px] font-bold text-[#D4C3A3] uppercase tracking-widest px-4">Spaces</p>
-            {stagingData.spaces.map(s => (
+            {stagingData.spaces?.map(s => (
               <button 
                 key={s.id} 
                 onClick={() => setActiveSpaceId(s.id)} 
@@ -214,7 +220,7 @@ export default function App() {
               <button 
                 onClick={() => {
                   const newId = `s${Date.now()}`;
-                  syncToCloud({ ...stagingData, spaces: [...stagingData.spaces, { id: newId, name: "新空間", items: [] }] });
+                  syncToCloud({ ...stagingData, spaces: [...(stagingData.spaces || []), { id: newId, name: "新空間", items: [] }] });
                 }} 
                 className="w-full p-4 border-2 border-dashed border-[#E8DCC4] rounded-2xl text-[#D4C3A3] hover:text-[#8B6B4D] flex items-center justify-center gap-2 transition-all"
               >
@@ -225,8 +231,8 @@ export default function App() {
 
           <section className="flex-1 bg-white rounded-[2rem] border border-[#E8DCC4] overflow-hidden shadow-sm">
             <div className="p-8 border-b border-[#F2E8D5] flex flex-wrap justify-between items-center bg-[#FDFBF7]/50 gap-4">
-              <h3 className="font-bold text-xl m-0">{activeSpace?.name} 家具清單</h3>
-              {isEditing && (
+              <h3 className="font-bold text-xl m-0">{activeSpace?.name || "未選擇場域"} 家具清單</h3>
+              {isEditing && activeSpace && (
                 <button 
                   onClick={() => {
                     const newItem = { id: `i${Date.now()}`, name: "新家具品項", size: "標準規格", price: 0 };
@@ -288,7 +294,7 @@ export default function App() {
                               syncToCloud({...stagingData, spaces: newSpaces});
                             }} 
                           />
-                        ) : `$${item.price.toLocaleString()}`}
+                        ) : `$${(item.price || 0).toLocaleString()}`}
                       </td>
                       {isEditing && (
                         <td className="p-8 text-right">
