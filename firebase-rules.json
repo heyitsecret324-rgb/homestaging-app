@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // [重點] 確保 appId 與你程式碼中的變數一致
+    match /artifacts/homestaging-v1/public/data/projects/{projectId} {
+      allow read, write: if true;
+    }
+  }
+}
