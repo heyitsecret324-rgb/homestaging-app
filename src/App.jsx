@@ -186,8 +186,8 @@ export default function App() {
         @media print { .print-hidden { display: none !important; } }
       `}</style>
 
-      <header className="bg-white/80 backdrop-blur-md border-b border-[#E8DCC4] p-4 sticky top-0 z-50 shadow-sm print-hidden">
-        <div className="max-w-6xl mx-auto flex justify-between items-center">
+      <header className="bg-white/80 backdrop-blur-md border-b border-[#E8DCC4] px-4 py-3 sticky top-0 z-50 shadow-sm print-hidden">
+        <div className="max-w-6xl mx-auto flex justify-between items-center gap-4">
           <div className="flex items-center gap-3">
             <div className="bg-[#8B6B4D] p-2 rounded-xl text-white shadow-md"><Home className="w-5 h-5" /></div>
             <div>
@@ -221,26 +221,30 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto p-6 md:p-10 space-y-10">
-        <section className="bg-white rounded-[2.5rem] p-8 md:p-12 border border-[#E8DCC4] shadow-xl shadow-[#8B6B4D]/5 flex flex-col md:flex-row justify-between items-center gap-8 relative overflow-hidden">
+      <main className="max-w-6xl mx-auto px-4 py-6 md:px-8 md:py-10 space-y-8 md:space-y-10">
+        <section className="bg-white rounded-[2.25rem] p-6 md:p-8 border border-[#E8DCC4] shadow-xl shadow-[#8B6B4D]/5 flex flex-col md:flex-row justify-between items-start gap-6 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-2 h-full bg-[#8B6B4D]"></div>
-          <div className="space-y-4 flex-1 w-full">
-            <div className="inline-block px-3 py-1 bg-[#FDFBF7] border border-[#E8DCC4] rounded-full text-[10px] font-bold text-[#A68B6D] uppercase tracking-widest">Project Proposal</div>
+          <div className="space-y-3 flex-1 w-full pr-0 md:pr-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#FDFBF7] border border-[#E8DCC4] rounded-full text-[10px] font-bold text-[#A68B6D] uppercase tracking-widest">
+              Project Proposal
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#8B6B4D]/60"></span>
+            </div>
             {isEditing ? (
               <input 
-                className="text-4xl font-bold w-full border-b border-[#E8DCC4] outline-none bg-transparent py-2"
+                className="text-3xl md:text-4xl font-bold w-full border-b border-[#E8DCC4] outline-none bg-transparent py-2"
                 value={stagingData.projectInfo?.name || ""} 
                 onChange={(e) => syncToCloud({...stagingData, projectInfo: {...stagingData.projectInfo, name: e.target.value}})}
               />
-            ) : <h2 className="text-4xl font-bold m-0 break-words">{stagingData.projectInfo?.name}</h2>}
-            <div className="flex flex-wrap items-center gap-4 text-sm text-[#A68B6D]">
-              <p className="flex items-center gap-2"><MapPin className="w-4 h-4" /> {stagingData.projectInfo?.address}</p>
-              <p className="px-3 py-1 bg-[#FDFBF7] rounded-lg border border-[#E8DCC4]/50">風格：{stagingData.projectInfo?.styleDesc}</p>
+            ) : <h2 className="text-3xl md:text-4xl font-bold m-0 break-words leading-tight">{stagingData.projectInfo?.name}</h2>}
+            <div className="flex flex-wrap items-center gap-3 text-sm text-[#A68B6D]">
+              <p className="flex items-center gap-2 m-0"><MapPin className="w-4 h-4" /> {stagingData.projectInfo?.address}</p>
+              <p className="m-0 px-3 py-1 bg-[#FDFBF7] rounded-lg border border-[#E8DCC4]/50">風格：{stagingData.projectInfo?.styleDesc}</p>
             </div>
           </div>
-          <div className="bg-[#4A3728] text-white p-8 rounded-[2rem] min-w-[240px] text-center shadow-2xl">
-            <p className="text-[10px] opacity-60 uppercase tracking-widest mb-1">Total Estimate</p>
-            <p className="text-4xl font-bold font-sans tracking-tighter">${totalBudget.toLocaleString()}</p>
+          <div className="w-full md:w-auto bg-[#4A3728] text-white px-6 py-5 rounded-[1.75rem] md:min-w-[260px] text-left md:text-center shadow-2xl self-stretch md:self-start">
+            <p className="text-[10px] opacity-70 uppercase tracking-widest mb-1 font-sans">Total Estimate</p>
+            <p className="text-3xl md:text-4xl font-bold font-sans tracking-tighter m-0">${totalBudget.toLocaleString()}</p>
+            <p className="mt-2 mb-0 text-[11px] opacity-70 font-sans">含所有場域加總</p>
           </div>
         </section>
 
@@ -270,7 +274,7 @@ export default function App() {
           </aside>
 
           <section className="flex-1 bg-white rounded-[2rem] border border-[#E8DCC4] overflow-hidden shadow-sm">
-            <div className="p-8 border-b border-[#F2E8D5] flex flex-wrap justify-between items-center bg-[#FDFBF7]/50 gap-4">
+            <div className="px-6 py-5 md:px-8 md:py-6 border-b border-[#F2E8D5] flex flex-wrap justify-between items-center bg-[#FDFBF7]/50 gap-4">
               <h3 className="font-bold text-xl m-0">{activeSpace?.name || "未選擇場域"} 家具清單</h3>
               {isEditing && activeSpace && (
                 <button 
@@ -290,16 +294,33 @@ export default function App() {
               <table className="w-full text-left min-w-[500px]">
                 <thead>
                   <tr className="text-[10px] uppercase tracking-widest text-[#A68B6D] border-b border-[#F2E8D5]">
-                    <th className="p-8">品項 Item</th>
-                    <th className="p-8">規格 Size</th>
-                    <th className="p-8 text-right">單價 Price</th>
-                    {isEditing && <th className="p-8 w-12"></th>}
+                    <th className="px-6 py-4 md:px-8 md:py-5">品項 Item</th>
+                    <th className="px-6 py-4 md:px-8 md:py-5">規格 Size</th>
+                    <th className="px-6 py-4 md:px-8 md:py-5 text-right">單價 Price</th>
+                    {isEditing && <th className="px-6 py-4 md:px-8 md:py-5 w-12"></th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#F2E8D5]">
+                  {(!activeSpace?.items || activeSpace.items.length === 0) && (
+                    <tr>
+                      <td colSpan={isEditing ? 4 : 3} className="px-6 py-10 md:px-8 md:py-14">
+                        <div className="flex items-start gap-4">
+                          <div className="shrink-0 w-10 h-10 rounded-2xl bg-[#FDFBF7] border border-[#E8DCC4] flex items-center justify-center text-[#8B6B4D]">
+                            <Home className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <p className="m-0 font-bold text-[#4A3728]">目前沒有家具品項</p>
+                            <p className="mt-1 mb-0 text-sm text-[#A68B6D] font-sans">
+                              {isEditing ? '點右上角「新增品項」開始建立清單。' : '切換到「編輯提案」即可新增品項。'}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                   {activeSpace?.items?.map(item => (
                     <tr key={item.id} className="hover:bg-[#FDFBF7]/30 transition-colors">
-                      <td className="p-8">
+                      <td className="px-6 py-5 md:px-8 md:py-6">
                         {isEditing ? (
                           <input 
                             className="font-bold text-base w-full outline-none bg-transparent border-b border-[#E8DCC4]" 
@@ -311,7 +332,7 @@ export default function App() {
                           />
                         ) : <span className="font-bold text-base">{item.name}</span>}
                       </td>
-                      <td className="p-8 text-sm text-[#A68B6D]">
+                      <td className="px-6 py-5 md:px-8 md:py-6 text-sm text-[#A68B6D]">
                         {isEditing ? (
                           <input 
                             className="w-full outline-none bg-transparent" 
@@ -323,7 +344,7 @@ export default function App() {
                           />
                         ) : item.size}
                       </td>
-                      <td className="p-8 text-right font-bold text-[#8B6B4D] font-sans">
+                      <td className="px-6 py-5 md:px-8 md:py-6 text-right font-bold text-[#8B6B4D] font-sans">
                         {isEditing ? (
                           <input 
                             type="number" 
@@ -337,7 +358,7 @@ export default function App() {
                         ) : `$${(item.price || 0).toLocaleString()}`}
                       </td>
                       {isEditing && (
-                        <td className="p-8 text-right">
+                        <td className="px-6 py-5 md:px-8 md:py-6 text-right">
                           <button 
                             onClick={() => {
                               const newSpaces = stagingData.spaces.map(s => s.id === activeSpaceId ? { ...s, items: s.items.filter(i => i.id !== item.id) } : s);
