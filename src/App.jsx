@@ -10,28 +10,49 @@ import {
 /**
  * 錯誤修正：加強對環境變數的檢查，避免 Script Error 崩潰
  */
-let firebaseConfig = {
-  apiKey: "",
-  authDomain: "",
-  projectId: "homestaging-v1",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
-};
-
-try {
-  if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-    firebaseConfig = JSON.parse(__firebase_config);
+function pickViteEnv(key, fallback = '') {
+  try {
+    const v = import.meta?.env?.[key];
+    return typeof v === 'string' ? v : fallback;
+  } catch {
+    return fallback;
   }
-} catch (e) {
-  console.error("Firebase config parse error", e);
 }
 
-const appId = typeof __app_id !== 'undefined' ? __app_id : "homestaging-v1";
+function getFirebaseConfig() {
+  // Firebase Hosting（例如 hosting + framework integration）可能會注入 __firebase_config
+  try {
+    if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+      return JSON.parse(__firebase_config);
+    }
+  } catch (e) {
+    console.error("Firebase config parse error", e);
+  }
+
+  // Vite 開發環境：使用 VITE_FIREBASE_*（若沒設定就會是空字串）
+  return {
+    apiKey: pickViteEnv('VITE_FIREBASE_API_KEY'),
+    authDomain: pickViteEnv('VITE_FIREBASE_AUTH_DOMAIN'),
+    projectId: pickViteEnv('VITE_FIREBASE_PROJECT_ID', 'homestaging-v1'),
+    storageBucket: pickViteEnv('VITE_FIREBASE_STORAGE_BUCKET'),
+    messagingSenderId: pickViteEnv('VITE_FIREBASE_MESSAGING_SENDER_ID'),
+    appId: pickViteEnv('VITE_FIREBASE_APP_ID'),
+  };
+}
+
+const firebaseConfig = getFirebaseConfig();
+
+const appId =
+  (typeof __app_id !== 'undefined' && __app_id) ? __app_id : pickViteEnv('VITE_FIREBASE_APP_ID', "homestaging-v1");
 
 // 初始化 Firebase 實例並封裝在 try-catch 中
 let app, auth, db;
 try {
+  if (!firebaseConfig?.apiKey || !firebaseConfig?.authDomain || !firebaseConfig?.projectId) {
+    throw new Error(
+      'Firebase 設定缺失：請在 Firebase Hosting 注入 __firebase_config，或在 Vite 環境設定 VITE_FIREBASE_API_KEY / VITE_FIREBASE_AUTH_DOMAIN / VITE_FIREBASE_PROJECT_ID。'
+    );
+  }
   if (getApps().length === 0) {
     app = initializeApp(firebaseConfig);
   } else {
@@ -50,12 +71,16 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [projectId, setProjectId] = useState(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
+  const [initError, setInitError] = useState(null);
   
   const hasLoadedInitial = useRef(false);
 
   // 處理身份驗證
   useEffect(() => {
-    if (!auth) return;
+    if (!auth) {
+      setInitError((prev) => prev || 'Firebase Auth 尚未初始化（多半是 Firebase 設定缺失或初始化失敗）。');
+      return;
+    }
 
     const urlParams = new URLSearchParams(window.location.search);
     const pid = urlParams.get('project') || 'demo_project';
@@ -82,7 +107,11 @@ export default function App() {
 
   // 監聽數據
   useEffect(() => {
-    if (!projectId || !user || !db) return;
+    if (!projectId || !user) return;
+    if (!db) {
+      setInitError((prev) => prev || 'Firestore 尚未初始化（多半是 Firebase 設定缺失或初始化失敗）。');
+      return;
+    }
 
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'projects', projectId);
     
@@ -105,6 +134,7 @@ export default function App() {
       }
     }, (err) => {
       console.error("Firestore error in snapshot:", err);
+      setInitError(`Firestore 讀取失敗：${err?.message || String(err)}`);
     });
     
     return () => unsubscribe();
@@ -135,6 +165,16 @@ export default function App() {
       <div className="text-center animate-pulse">
         <Home className="w-12 h-12 text-[#8B6B4D] mx-auto mb-4" />
         <p className="text-[#8B6B4D] font-serif tracking-widest">初始化中，請稍候...</p>
+        {initError && (
+          <div className="mt-4 max-w-lg text-left bg-white/80 border border-[#E8DCC4] rounded-2xl p-4 shadow-sm">
+            <p className="m-0 text-xs font-bold text-[#8B6B4D] tracking-widest uppercase">Initialization error</p>
+            <p className="mt-2 mb-0 text-sm text-[#4A3728] break-words">{initError}</p>
+            <p className="mt-3 mb-0 text-[11px] text-[#A68B6D] font-sans break-words">
+              提示：本機請在 `.env.local` 設定 `VITE_FIREBASE_API_KEY / VITE_FIREBASE_AUTH_DOMAIN / VITE_FIREBASE_PROJECT_ID`；
+              部署到 Firebase Hosting 則應由平台注入 `__firebase_config`。
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
